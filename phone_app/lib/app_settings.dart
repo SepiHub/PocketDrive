@@ -1,6 +1,8 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'updater.dart';
+
 /// The phone app's own preferences (not secret; stored in plain app
 /// preferences, unlike the pairing).
 class AppSettings extends ChangeNotifier {
@@ -146,6 +148,9 @@ class SettingsPage extends StatelessWidget {
                 ],
               ),
             ),
+            const SizedBox(height: 16),
+            const ListTile(title: Text('About'), dense: true),
+            const UpdateTile(),
           ],
         ),
       ),

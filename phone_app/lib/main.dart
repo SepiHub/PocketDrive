@@ -12,6 +12,7 @@ import 'pc_client.dart';
 import 'scan_page.dart';
 import 'session.dart';
 import 'thumbnails.dart';
+import 'updater.dart';
 import 'upload_queue.dart';
 import 'video_relay.dart';
 
@@ -27,6 +28,7 @@ class PocketDriveApp extends StatelessWidget {
     return MaterialApp(
       title: 'PocketDrive',
       debugShowCheckedModeBanner: false,
+      scaffoldMessengerKey: PhoneUpdater.messengerKey,
       theme: ThemeData(colorSchemeSeed: Colors.teal),
       darkTheme: ThemeData(
         colorSchemeSeed: Colors.teal,
@@ -65,6 +67,7 @@ class _RootPageState extends State<RootPage> {
       _settings = settings;
       _loaded = true;
     });
+    unawaited(PhoneUpdater.instance.check());
   }
 
   Future<void> _onPaired(PcPairing p) async {

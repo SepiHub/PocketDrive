@@ -5,3 +5,4 @@ export 'src/api.dart';
 export 'src/entry.dart';
 export 'src/pairing.dart';
 export 'src/tls.dart';
+export 'src/updates.dart';

@@ -16,6 +16,7 @@ import 'server/announce.dart';
 import 'server/hidden_folders.dart';
 import 'server/network.dart';
 import 'server/thumbnails.dart';
+import 'updater.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -56,6 +57,7 @@ class _HomePageState extends State<HomePage> {
     onQuit: _quit,
   );
   bool _startAtLogin = false;
+  late final _updater = PcUpdater(quit: _quit);
   final _paired = StreamController<PairedDevice>.broadcast();
   final _thumbs = ThumbnailService(
     Directory(
@@ -83,10 +85,17 @@ class _HomePageState extends State<HomePage> {
     super.initState();
     _shell.init();
     unawaited(
-      StartAtLogin.isEnabled().then((on) {
+      StartAtLogin.isEnabled().then((on) async {
+        // An installed copy may have moved (or replaced a dev build):
+        // point the sign-in entry at this exe.
+        if (on && isReleaseBuild) await StartAtLogin.setEnabled(true);
         if (mounted) setState(() => _startAtLogin = on);
       }),
     );
+    _updater.addListener(() {
+      if (mounted) setState(() {});
+    });
+    _updater.start();
     unawaited(_init());
   }
 
@@ -135,6 +144,7 @@ class _HomePageState extends State<HomePage> {
     unawaited(_server.stop());
     unawaited(_devicesSub?.cancel());
     unawaited(_paired.close());
+    _updater.dispose();
     super.dispose();
   }
 
@@ -281,6 +291,10 @@ class _HomePageState extends State<HomePage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          if (_updater.available != null) ...[
+            _updateCard(theme, _updater.available!),
+            const SizedBox(height: 8),
+          ],
           Card(
             child: ListTile(
               leading: const Icon(Icons.folder_shared_outlined),
@@ -390,8 +404,92 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
             ),
+          const SizedBox(height: 24),
+          _versionLine(theme),
         ],
       ),
+    );
+  }
+
+  Widget _updateCard(ThemeData theme, ReleaseInfo info) {
+    final u = _updater;
+    return Card(
+      color: theme.colorScheme.primaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.system_update_alt),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    u.installing
+                        ? 'Downloading PocketDrive ${info.version}\u2026'
+                        : 'PocketDrive ${info.version} is available',
+                    style: theme.textTheme.titleMedium,
+                  ),
+                ),
+                if (!u.installing)
+                  FilledButton(
+                    onPressed: u.install,
+                    child: const Text('Install update'),
+                  ),
+              ],
+            ),
+            if (u.installing) ...[
+              const SizedBox(height: 8),
+              LinearProgressIndicator(value: u.progress),
+              const SizedBox(height: 4),
+              const Text(
+                'PocketDrive closes for a moment while it updates and then '
+                'starts again by itself.',
+              ),
+            ] else
+              const Padding(
+                padding: EdgeInsets.only(top: 4),
+                child: Text(
+                  'Sharing pauses for a few seconds while it installs. '
+                  'Paired phones and settings are kept.',
+                ),
+              ),
+            if (u.error != null)
+              Text(u.error!, style: TextStyle(color: theme.colorScheme.error)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _versionLine(ThemeData theme) {
+    final u = _updater;
+    final style = theme.textTheme.bodySmall;
+    if (!isReleaseBuild) {
+      return Text('Development build (updates are off)', style: style);
+    }
+    return Row(
+      children: [
+        Text('Version $appVersion', style: style),
+        const SizedBox(width: 8),
+        if (u.checking)
+          const SizedBox.square(
+            dimension: 14,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+        else
+          TextButton(
+            onPressed: u.check,
+            child: Text(
+              u.available != null
+                  ? 'Update available'
+                  : u.upToDate
+                  ? 'Up to date \u00b7 check again'
+                  : 'Check for updates',
+            ),
+          ),
+      ],
     );
   }
 

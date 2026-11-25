@@ -13,3 +13,6 @@ Thumbs.db
 key.properties
 local.properties
 test_share/
+
+# Release builds
+dist/

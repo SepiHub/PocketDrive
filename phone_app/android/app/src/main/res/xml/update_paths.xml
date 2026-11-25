@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only the downloaded-update folder is shared, and only with Android's
+     package installer (via a one-off read grant). -->
+<paths>
+    <cache-path name="updates" path="updates/" />
+</paths>

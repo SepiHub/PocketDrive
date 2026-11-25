@@ -37,6 +37,27 @@ shared/     Dart package with the protocol shared by both apps
 docs/       Design notes
 ```
 
+## Installing
+
+Download both files from the [latest release](https://github.com/SepiHub/PocketDrive/releases/latest):
+
+- **PC:** run `PocketDrive-Setup-x.y.z.exe`. It installs for your Windows account only (no admin
+  prompt) and can optionally download FFmpeg for built-in subtitle tracks. Windows may warn that
+  the installer is unrecognized; choose *More info* > *Run anyway*.
+- **Phone:** open `PocketDrive-x.y.z.apk` on your Android phone and allow installing it.
+
+Both apps check GitHub for new versions and update with one tap. Pairings and settings are kept.
+
+## Releasing
+
+```powershell
+.	oolselease.ps1            # build the next version into dist\ to test
+.	oolselease.ps1 -Publish   # build, tag and publish it as a GitHub release
+```
+
+Needs Inno Setup 6 (`winget install JRSoftware.InnoSetup`) and the Android signing key
+(`phone_app/android/key.properties`, never committed).
+
 ## Building
 
 Requires Flutter (stable) with Windows desktop and Android toolchains. Optional on the PC: [FFmpeg](https://ffmpeg.org) for built-in subtitle tracks (`winget install Gyan.FFmpeg`).
