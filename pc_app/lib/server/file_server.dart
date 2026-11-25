@@ -12,6 +12,7 @@ import 'byte_range.dart';
 import 'devices.dart';
 import 'network.dart';
 import 'path_jail.dart';
+import 'thumbnails.dart';
 
 /// Everything the request handlers need.
 class ServerContext {
@@ -20,6 +21,7 @@ class ServerContext {
     required this.devices,
     required this.identity,
     required this.pairingWindow,
+    required this.thumbs,
     this.onPaired,
     void Function(String)? log,
   }) : log = log ?? ((_) {});
@@ -27,6 +29,7 @@ class ServerContext {
   final PathJail jail;
   final DeviceStore devices;
   final PcIdentity identity;
+  final ThumbnailService thumbs;
 
   /// The currently open pairing window, if any.
   final PairingWindow? Function() pairingWindow;
@@ -45,7 +48,8 @@ Handler buildHandler(ServerContext c) {
     ..get(Api.info, (Request r) => _json(200,
         PcInfo(pcId: c.identity.pcId, pcName: c.identity.pcName).toJson()))
     ..get(Api.list, (Request r) => _list(c.jail, r))
-    ..get(Api.file, (Request r) => _file(c.jail, r));
+    ..get(Api.file, (Request r) => _file(c.jail, r))
+    ..get(Api.thumb, (Request r) => _thumb(c, r));
   return const Pipeline()
       .addMiddleware(_errorMiddleware(c.log))
       .addMiddleware(_localNetworkOnly(c.log))
@@ -157,6 +161,25 @@ Future<Response> _file(PathJail jail, Request r) async {
   );
 }
 
+Future<Response> _thumb(ServerContext c, Request r) async {
+  final real = await c.jail.resolveExisting(_pathParam(r));
+  if (!await FileSystemEntity.isFile(real)) {
+    return _error(400, ApiError.notAFile);
+  }
+  final size = ThumbnailService.snapSize(
+      int.tryParse(r.url.queryParameters['size'] ?? ''));
+  final thumb = await c.thumbs.thumbnail(real, size);
+  if (thumb == null) return _error(404, ApiError.noThumbnail);
+  return Response.ok(
+    thumb.openRead(),
+    headers: {
+      'content-type': 'image/jpeg',
+      'content-length': '${await thumb.length()}',
+      'cache-control': 'private, max-age=604800',
+    },
+  );
+}
+
 HttpConnectionInfo? _remote(Request r) =>
     r.context['shelf.io.connection_info'] as HttpConnectionInfo?;
 
@@ -225,6 +248,7 @@ class PocketServer {
     required DeviceStore devices,
     required PcIdentity identity,
     required PairingWindow? Function() pairingWindow,
+    required ThumbnailService thumbs,
     void Function(PairedDevice)? onPaired,
     InternetAddress? address,
     int port = Api.defaultPort,
@@ -237,6 +261,7 @@ class PocketServer {
       devices: devices,
       identity: identity,
       pairingWindow: pairingWindow,
+      thumbs: thumbs,
       onPaired: onPaired,
       log: log,
     ));

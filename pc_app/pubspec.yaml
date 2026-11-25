@@ -45,6 +45,9 @@ dependencies:
   basic_utils: ^5.8.2
   crypto: ^3.0.8
   qr_flutter: ^4.1.0
+  win32: ^6.4.0
+  ffi: ^2.2.0
+  image: ^4.13.1
 
 dev_dependencies:
   flutter_test:

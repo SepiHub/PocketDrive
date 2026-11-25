@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:pocketdrive_shared/pocketdrive_shared.dart';
 
@@ -30,7 +31,9 @@ const _timeout = Duration(seconds: 5);
 /// Talks to the paired PC over HTTPS, trusting only its pinned certificate.
 class PcClient {
   PcClient(this.pairing, {this.onHostChanged})
-      : _http = pinnedHttpClient(pairing.fingerprint);
+      : _http = pinnedHttpClient(pairing.fingerprint)
+          // A grid asks for many thumbnails at once; don't flood the PC.
+          ..maxConnectionsPerHost = 6;
 
   final PcPairing pairing;
   final void Function(String host)? onHostChanged;
@@ -113,6 +116,24 @@ class PcClient {
     return Listing.fromJson(await _send(
         _http, 'GET', _uri(h, Api.list, {'path': path}),
         token: pairing.token));
+  }
+
+  /// JPEG thumbnail bytes, or null if the PC has no preview for this file.
+  Future<Uint8List?> thumbnail(String path, int size) async {
+    final h = await connect();
+    final req = await _http
+        .getUrl(_uri(h, Api.thumb, {'path': path, 'size': '$size'}))
+        .timeout(_timeout);
+    req.headers.set(Api.authHeader, Api.bearer(pairing.token));
+    final res = await req.close().timeout(_timeout);
+    // Big previews of large photos can take a while to render on the PC.
+    final bytes = await res
+        .fold<BytesBuilder>(BytesBuilder(copy: false), (b, d) => b..add(d))
+        .timeout(const Duration(seconds: 60));
+    if (res.statusCode == 401) throw const NotPaired();
+    if (res.statusCode == 404) return null;
+    if (res.statusCode != 200) throw PcError(res.statusCode, 'thumb');
+    return bytes.takeBytes();
   }
 
   Uri _uri(String host, String path, [Map<String, String>? query]) => Uri(

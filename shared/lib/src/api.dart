@@ -12,7 +12,9 @@ abstract final class Api {
   /// `GET ?path=` -> file bytes. Supports a single HTTP `Range` (`bytes=a-b`).
   static const String file = '/api/file';
 
-  /// `GET ?path=&size=` -> JPEG thumbnail (stage 3).
+  /// `GET ?path=&size=` -> JPEG that fits in size x size (snapped up to
+  /// 128, 256, 512, 1024 or 2048). 404 `no_thumbnail` if Windows can't
+  /// preview the file.
   static const String thumb = '/api/thumb';
 
   /// `POST ?path=` -> upload into a folder (stage 5).
@@ -42,4 +44,5 @@ abstract final class ApiError {
   static const String pairingClosed = 'pairing_closed';
   static const String badRequest = 'bad_request';
   static const String notLocalNetwork = 'not_local_network';
+  static const String noThumbnail = 'no_thumbnail';
 }

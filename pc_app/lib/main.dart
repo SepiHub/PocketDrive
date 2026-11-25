@@ -12,6 +12,7 @@ import 'pairing_dialog.dart';
 import 'server/devices.dart';
 import 'server/file_server.dart';
 import 'server/network.dart';
+import 'server/thumbnails.dart';
 
 void main() {
   runApp(const PocketDriveApp());
@@ -43,6 +44,10 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final _server = PocketServer();
   final _paired = StreamController<PairedDevice>.broadcast();
+  final _thumbs = ThumbnailService(Directory(p.join(
+      Platform.environment['LOCALAPPDATA'] ?? AppConfig.dataDir.path,
+      'PocketDrive',
+      'thumbs')));
   AppConfig? _config;
   PcIdentity? _identity;
   DeviceStore? _devices;
@@ -122,6 +127,7 @@ class _HomePageState extends State<HomePage> {
         devices: _devices!,
         identity: _identity!,
         pairingWindow: () => _pairing,
+        thumbs: _thumbs,
         onPaired: _paired.add,
         log: debugPrint,
       );

@@ -4,9 +4,11 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:pocketdrive_shared/pocketdrive_shared.dart';
 
+import 'browser_page.dart';
 import 'pairing_store.dart';
 import 'pc_client.dart';
 import 'scan_page.dart';
+import 'thumbnails.dart';
 
 void main() {
   runApp(const PocketDriveApp());
@@ -164,8 +166,7 @@ class _SetupPageState extends State<SetupPage> {
   }
 }
 
-/// Stage 2 placeholder: proves the paired connection works by showing the
-/// top of the shared folder. Real browsing comes in stage 3.
+/// The paired PC: owns the connection and shows its shared folder.
 class PcPage extends StatefulWidget {
   const PcPage({
     super.key,
@@ -185,41 +186,12 @@ class PcPage extends StatefulWidget {
 class _PcPageState extends State<PcPage> {
   late final PcClient _client =
       PcClient(widget.pairing, onHostChanged: widget.onHostChanged);
-  Listing? _listing;
-  String? _error;
-  bool _notPaired = false;
-  bool _loading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    unawaited(_load());
-  }
+  late final ThumbnailCache _thumbs = ThumbnailCache(_client);
 
   @override
   void dispose() {
     _client.close();
     super.dispose();
-  }
-
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    try {
-      _listing = await _client.list('');
-    } on NotPaired {
-      _notPaired = true;
-      _error = '${widget.pairing.pcName} no longer accepts this phone '
-          '(it was removed on the PC). Pair again.';
-    } on PcUnreachable {
-      _error = "Can't reach ${widget.pairing.pcName}. Is it on, is "
-          'PocketDrive running there, and is the phone on the same Wi-Fi?';
-    } on Object catch (e) {
-      _error = 'Something went wrong: $e';
-    }
-    if (mounted) setState(() => _loading = false);
   }
 
   Future<void> _confirmUnpair() async {
@@ -243,63 +215,20 @@ class _PcPageState extends State<PcPage> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final listing = _listing;
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.pairing.pcName),
-        actions: [
-          IconButton(
-              tooltip: 'Refresh',
-              onPressed: _loading ? null : _load,
-              icon: const Icon(Icons.refresh)),
-          PopupMenuButton<String>(
-            onSelected: (_) => _confirmUnpair(),
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'unpair', child: Text('Forget this PC')),
-            ],
-          ),
+    return BrowserPage(
+      client: _client,
+      thumbs: _thumbs,
+      path: '',
+      onNotPaired: () {
+        Navigator.of(context).popUntil((r) => r.isFirst);
+        unawaited(widget.onUnpair());
+      },
+      menu: PopupMenuButton<String>(
+        onSelected: (_) => _confirmUnpair(),
+        itemBuilder: (_) => const [
+          PopupMenuItem(value: 'unpair', child: Text('Forget this PC')),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-              ? ListView(padding: const EdgeInsets.all(24), children: [
-                  Text(_error!, style: theme.textTheme.bodyLarge),
-                  const SizedBox(height: 16),
-                  if (_notPaired)
-                    FilledButton(
-                        onPressed: widget.onUnpair,
-                        child: const Text('Pair again'))
-                  else
-                    FilledButton(
-                        onPressed: _load, child: const Text('Try again')),
-                ])
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  child: ListView(children: [
-                    ListTile(
-                      leading: const Icon(Icons.lock, color: Colors.green),
-                      title: const Text('Connected securely'),
-                      subtitle: Text('${_client.host}:${widget.pairing.port}'
-                          ' · ${listing!.entries.length} items in the '
-                          'shared folder'),
-                    ),
-                    const Divider(),
-                    for (final e in listing.entries)
-                      ListTile(
-                        leading: Icon(e.isDir
-                            ? Icons.folder
-                            : switch (e.kind) {
-                                MediaKind.image => Icons.image_outlined,
-                                MediaKind.video => Icons.movie_outlined,
-                                MediaKind.other =>
-                                  Icons.insert_drive_file_outlined,
-                              }),
-                        title: Text(e.name),
-                      ),
-                  ]),
-                ),
     );
   }
 }

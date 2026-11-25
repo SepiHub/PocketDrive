@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 
 /// A temporary folder tree for tests:
@@ -10,6 +11,7 @@ import 'package:path/path.dart' as p;
 ///   share/                     <- the shared folder
 ///     a.txt                    "hello world"
 ///     sub/b.txt
+///     photo.jpg                1200x800
 ///     .hidden, Thumbs.db, upload.mp4.partial
 ///     escape  -> junction to base/outside
 ///     inner   -> junction to share/sub (allowed)
@@ -34,6 +36,15 @@ class Fixture {
     await File(p.join(f.outside, 'secret.txt')).writeAsString('SECRET');
     await File(p.join(f.share, 'a.txt')).writeAsString('hello world');
     await File(p.join(f.share, 'sub', 'b.txt')).writeAsString('bee');
+    // A 1200x800 photo with a gradient, for thumbnail tests.
+    final photo = img.Image(width: 1200, height: 800);
+    for (final px in photo) {
+      px
+        ..r = px.x * 255 ~/ 1200
+        ..g = px.y * 255 ~/ 800
+        ..b = 128;
+    }
+    await File(p.join(f.share, 'photo.jpg')).writeAsBytes(img.encodeJpg(photo));
     await File(p.join(f.share, '.hidden')).writeAsString('x');
     await File(p.join(f.share, 'Thumbs.db')).writeAsString('x');
     await File(p.join(f.share, 'upload.mp4.partial')).writeAsString('x');

@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:pocketdrive_pc/identity.dart';
 import 'package:pocketdrive_pc/server/devices.dart';
 import 'package:pocketdrive_pc/server/file_server.dart';
+import 'package:pocketdrive_pc/server/thumbnails.dart';
 import 'package:pocketdrive_shared/pocketdrive_shared.dart';
 
 import 'fixture.dart';
@@ -35,6 +36,7 @@ void main() {
       devices: devices,
       identity: identity,
       pairingWindow: () => window,
+      thumbs: ThumbnailService(Directory(p.join(f.base.path, 'thumbs'))),
       onPaired: paired.add,
       address: InternetAddress.loopbackIPv4,
       port: 0,

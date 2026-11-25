@@ -53,6 +53,7 @@ class _PairingDialogState extends State<PairingDialog> {
     final theme = Theme.of(context);
     return AlertDialog(
       title: const Text('Pair a phone'),
+      scrollable: true,
       content: SizedBox(
         width: 320,
         child: Column(
