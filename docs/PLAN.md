@@ -12,8 +12,8 @@
   - `POST /api/pair` – exchange one-time pairing code for a device token
 - Path safety on every request: reject absolute paths, `..`, drive letters, UNC paths and `:` (alternate data streams); resolve symlinks/junctions and require the real path to be inside the shared folder; listings skip entries that resolve outside it.
 - Uploads are written to `*.partial` and renamed when complete; never overwrite (auto-rename to `name (2).ext`).
-- Thumbnails come from the Windows shell thumbnail provider (same as Explorer), cached in `%LOCALAPPDATA%\pc-storage\thumbs`.
-- Config in `%APPDATA%\pc-storage`: shared folder, PC id, certificate, hashed device tokens.
+- Thumbnails come from the Windows shell thumbnail provider (same as Explorer), cached in `%LOCALAPPDATA%\PocketDrive\thumbs`.
+- Config in `%APPDATA%\PocketDrive`: shared folder, PC id, certificate, hashed device tokens.
 
 ### Pairing
 - QR code: PC address, port, PC id, one-time pairing code (5 min, single use), certificate SHA-256 fingerprint.
@@ -37,7 +37,7 @@ Nothing in auth or the protocol assumes the LAN. The server currently refuses no
 
 | # | Stage | Test |
 |---|---|---|
-| 1 | PC server + folder picker | Unit tests for traversal/junction escapes; `curl` locally (server bound to localhost until auth exists) |
+| 1 ✅ | PC server + folder picker | Unit tests for traversal/junction escapes; `curl` locally (server bound to localhost until auth exists) |
 | 2 | Pairing (QR + token) + HTTPS | Scan from the phone; no/wrong/revoked token is rejected |
 | 3 | Phone browsing + thumbnails | Install on the phone, browse, check the grid |
 | 4 | Video streaming | Play a large video and seek around |

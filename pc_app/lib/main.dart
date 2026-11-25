@@ -1,122 +1,170 @@
+import 'dart:async';
+
+import 'package:file_selector/file_selector.dart';
 import 'package:material_ui/material_ui.dart';
 
+import 'config.dart';
+import 'server/file_server.dart';
+
 void main() {
-  runApp(const MyApp());
+  runApp(const PocketDriveApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class PocketDriveApp extends StatelessWidget {
+  const PocketDriveApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: .fromSeed(seedColor: Colors.deepPurple),
-      ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      title: 'PocketDrive',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(colorSchemeSeed: Colors.teal),
+      darkTheme: ThemeData(
+          colorSchemeSeed: Colors.teal, brightness: Brightness.dark),
+      home: const HomePage(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+class HomePage extends StatefulWidget {
+  const HomePage({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<HomePage> createState() => _HomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _HomePageState extends State<HomePage> {
+  final _server = PocketServer();
+  AppConfig? _config;
+  String? _error;
+  bool _busy = false;
 
-  void _incrementCounter() {
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_init());
+  }
+
+  Future<void> _init() async {
+    final config = await AppConfig.load();
+    setState(() => _config = config);
+    if (config.sharedFolder != null) await _startServer();
+  }
+
+  @override
+  void dispose() {
+    unawaited(_server.stop());
+    super.dispose();
+  }
+
+  Future<void> _chooseFolder() async {
+    final picked = await getDirectoryPath(
+      confirmButtonText: 'Share this folder',
+      initialDirectory: _config?.sharedFolder,
+    );
+    if (picked == null) return;
+    final problem = checkShareableFolder(picked);
+    if (problem != null) {
+      setState(() => _error = problem);
+      return;
+    }
+    _config!.sharedFolder = picked;
+    await _config!.save();
+    await _startServer();
+  }
+
+  Future<void> _startServer() async {
+    final folder = _config?.sharedFolder;
+    if (folder == null) return;
     setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
+      _busy = true;
+      _error = null;
     });
+    try {
+      await _server.start(folder: folder, log: debugPrint);
+    } on Object catch (e) {
+      _error = 'Could not start the server: $e';
+    }
+    setState(() => _busy = false);
+  }
+
+  Future<void> _stopServer() async {
+    await _server.stop();
+    setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
+    final config = _config;
+    final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: .center,
-          children: [
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+      appBar: AppBar(title: const Text('PocketDrive')),
+      body: config == null
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.folder_shared_outlined),
+                    title: const Text('Shared folder'),
+                    subtitle: Text(config.sharedFolder ?? 'None chosen yet'),
+                    trailing: FilledButton.tonal(
+                      onPressed: _busy ? null : _chooseFolder,
+                      child: Text(config.sharedFolder == null
+                          ? 'Choose folder…'
+                          : 'Change…'),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Card(
+                  child: ListTile(
+                    leading: Icon(
+                      _server.isRunning ? Icons.cloud_done : Icons.cloud_off,
+                      color: _server.isRunning ? Colors.green : null,
+                    ),
+                    title: Text(_server.isRunning
+                        ? 'Server running'
+                        : 'Server stopped'),
+                    subtitle: Text(_server.isRunning
+                        ? 'http://127.0.0.1:${_server.port}  (this PC only for now)'
+                        : config.sharedFolder == null
+                            ? 'Choose a folder to start sharing.'
+                            : 'Not sharing.'),
+                    trailing: config.sharedFolder == null
+                        ? null
+                        : OutlinedButton(
+                            onPressed: _busy
+                                ? null
+                                : (_server.isRunning
+                                    ? _stopServer
+                                    : _startServer),
+                            child: Text(_server.isRunning ? 'Stop' : 'Start'),
+                          ),
+                  ),
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 8),
+                  Card(
+                    color: theme.colorScheme.errorContainer,
+                    child: ListTile(
+                      leading: Icon(Icons.error_outline,
+                          color: theme.colorScheme.onErrorContainer),
+                      title: Text(_error!,
+                          style: TextStyle(
+                              color: theme.colorScheme.onErrorContainer)),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                Text(
+                  'Your phone can\'t connect yet. Pairing with a QR code '
+                  'comes in the next stage.',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ),
     );
   }
 }

@@ -1,5 +1,5 @@
-/// A Calculator.
-class Calculator {
-  /// Returns [value] plus 1.
-  int addOne(int value) => value + 1;
-}
+/// Protocol shared by the PocketDrive PC app (server) and phone app (client).
+library;
+
+export 'src/api.dart';
+export 'src/entry.dart';
