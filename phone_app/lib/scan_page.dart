@@ -11,8 +11,9 @@ class ScanPage extends StatefulWidget {
 }
 
 class _ScanPageState extends State<ScanPage> {
-  final _controller =
-      MobileScannerController(formats: const [BarcodeFormat.qrCode]);
+  final _controller = MobileScannerController(
+    formats: const [BarcodeFormat.qrCode],
+  );
   bool _done = false;
   bool _sawOtherCode = false;
 
@@ -50,8 +51,8 @@ class _ScanPageState extends State<ScanPage> {
                 child: Text(
                   error.errorCode == MobileScannerErrorCode.permissionDenied
                       ? 'PocketDrive needs the camera to scan the pairing '
-                          'code. Allow it in Settings > Apps > PocketDrive > '
-                          'Permissions > Camera.'
+                            'code. Allow it in Settings > Apps > PocketDrive > '
+                            'Permissions > Camera.'
                       : 'Camera problem: ${error.errorCode.name}',
                   textAlign: TextAlign.center,
                 ),
@@ -65,8 +66,10 @@ class _ScanPageState extends State<ScanPage> {
                 margin: EdgeInsets.all(24),
                 child: Padding(
                   padding: EdgeInsets.all(12),
-                  child: Text('That isn\'t a PocketDrive code. On your PC, '
-                      'click "Pair a phone" and scan the code it shows.'),
+                  child: Text(
+                    'That isn\'t a PocketDrive code. On your PC, '
+                    'click "Pair a phone" and scan the code it shows.',
+                  ),
                 ),
               ),
             ),

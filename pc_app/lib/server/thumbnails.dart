@@ -20,7 +20,7 @@ import 'package:win32/win32.dart';
 /// Dart if the shell has nothing.
 class ThumbnailService {
   ThumbnailService(this.cacheDir, {int maxParallel = 4})
-      : _slots = _Semaphore(maxParallel);
+    : _slots = _Semaphore(maxParallel);
 
   /// Sizes we render; requests snap up to the next one so the cache stays
   /// small. The phone uses 256 for the grid and 2048 for the viewer.
@@ -43,8 +43,12 @@ class ThumbnailService {
   Future<File?> thumbnail(String realPath, int size) async {
     final stat = await File(realPath).stat();
     final key = sha1
-        .convert(utf8.encode('${realPath.toLowerCase()}|'
-            '${stat.modified.millisecondsSinceEpoch}|${stat.size}|$size'))
+        .convert(
+          utf8.encode(
+            '${realPath.toLowerCase()}|'
+            '${stat.modified.millisecondsSinceEpoch}|${stat.size}|$size',
+          ),
+        )
         .toString();
     if (_failed.contains(key)) return null;
     final out = File(p.join(cacheDir.path, key.substring(0, 2), '$key.jpg'));
@@ -97,7 +101,9 @@ img.Image? _shellThumbnail(String path, int size) {
   IShellItemImageFactory? factory;
   try {
     factory = SHCreateItemFromParsingName<IShellItemImageFactory>(
-        arena.pcwstr(path), null);
+      arena.pcwstr(path),
+      null,
+    );
     final sz = arena<SIZE>().ref
       ..cx = size
       ..cy = size;
@@ -125,7 +131,8 @@ img.Image? _bitmapToImage(HBITMAP hbm, Arena arena) {
   info.ref.bmiHeader
     ..biSize = sizeOf<BITMAPINFOHEADER>()
     ..biWidth = w
-    ..biHeight = -h // top-down rows
+    ..biHeight =
+        -h // top-down rows
     ..biPlanes = 1
     ..biBitCount = 32
     ..biCompression = BI_RGB;

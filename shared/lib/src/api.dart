@@ -17,8 +17,14 @@ abstract final class Api {
   /// preview the file.
   static const String thumb = '/api/thumb';
 
-  /// `POST ?path=` -> upload into a folder (stage 5).
+  /// `POST ?path=<folder>&name=<file name>&modified=<ms since epoch>` with
+  /// the raw file bytes as body -> JSON [RemoteEntry] of the saved file
+  /// (its name may get ` (2)` added; nothing is ever overwritten).
   static const String upload = '/api/upload';
+
+  /// `POST ?path=<parent folder>&name=<new folder name>` -> JSON
+  /// [RemoteEntry] of the new folder. 409 `exists` if the name is taken.
+  static const String mkdir = '/api/mkdir';
 
   /// `POST` [PairRequest] -> [PairResponse]. The only endpoint that needs no
   /// device token; works only while the PC shows a pairing QR code.
@@ -45,4 +51,7 @@ abstract final class ApiError {
   static const String badRequest = 'bad_request';
   static const String notLocalNetwork = 'not_local_network';
   static const String noThumbnail = 'no_thumbnail';
+  static const String uploadIncomplete = 'upload_incomplete';
+  static const String writeFailed = 'write_failed';
+  static const String exists = 'exists';
 }

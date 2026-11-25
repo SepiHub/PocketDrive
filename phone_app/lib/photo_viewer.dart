@@ -43,16 +43,26 @@ class _PhotoViewerState extends State<PhotoViewer> {
     super.dispose();
   }
 
-  PcImage _image(int i, int size) => PcImage(widget.thumbs,
-      joinPath(widget.folder, widget.photos[i].name), widget.photos[i], size);
+  /// GIFs load the original file so they animate; other photos use the
+  /// PC's 2048 px preview.
+  int _fullSize(int i) => isGif(widget.photos[i].name) ? 0 : 2048;
+
+  PcImage _image(int i, int size) => PcImage(
+    widget.thumbs,
+    joinPath(widget.folder, widget.photos[i].name),
+    widget.photos[i],
+    size,
+  );
 
   void _swipeBy(double dx) {
     if (!_pages.hasClients) return;
     _swiping = true;
     final pos = _pages.position;
-    _pages.jumpTo((pos.pixels - dx)
-        .clamp(pos.minScrollExtent, pos.maxScrollExtent)
-        .toDouble());
+    _pages.jumpTo(
+      (pos.pixels - dx)
+          .clamp(pos.minScrollExtent, pos.maxScrollExtent)
+          .toDouble(),
+    );
   }
 
   /// Finishes a swipe: a quick flick or dragging past 25% changes photo.
@@ -64,15 +74,21 @@ class _PhotoViewerState extends State<PhotoViewer> {
     if (velocityX < -400 || page > _index + 0.25) target = _index + 1;
     if (velocityX > 400 || page < _index - 0.25) target = _index - 1;
     target = target.clamp(0, widget.photos.length - 1);
-    _pages.animateToPage(target,
-        duration: const Duration(milliseconds: 220), curve: Curves.easeOut);
+    _pages.animateToPage(
+      target,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOut,
+    );
   }
 
   void _swipeCancel() {
     if (!_swiping) return;
     _swiping = false;
-    _pages.animateToPage(_index,
-        duration: const Duration(milliseconds: 150), curve: Curves.easeOut);
+    _pages.animateToPage(
+      _index,
+      duration: const Duration(milliseconds: 150),
+      curve: Curves.easeOut,
+    );
   }
 
   @override
@@ -104,13 +120,17 @@ class _PhotoViewerState extends State<PhotoViewer> {
           // Warm up the neighbours so swiping feels instant.
           for (final n in [i - 1, i + 1]) {
             if (n >= 0 && n < widget.photos.length) {
-              precacheImage(_image(n, 2048), context, onError: (_, _) {});
+              precacheImage(
+                _image(n, _fullSize(n)),
+                context,
+                onError: (_, _) {},
+              );
             }
           }
         },
         itemBuilder: (context, i) => _ZoomablePhoto(
           preview: _image(i, 256),
-          full: _image(i, 2048),
+          full: _image(i, _fullSize(i)),
           onSwipe: _swipeBy,
           onSwipeEnd: _swipeEnd,
           onSwipeCancel: _swipeCancel,
@@ -146,8 +166,10 @@ class _ZoomablePhotoState extends State<_ZoomablePhoto>
     vsync: this,
     duration: const Duration(milliseconds: 280),
   )..addListener(() => _transform.value = _zoomTween!.evaluate(_zoomCurve));
-  late final Animation<double> _zoomCurve =
-      CurvedAnimation(parent: _zoomAnimation, curve: Curves.easeOutCubic);
+  late final Animation<double> _zoomCurve = CurvedAnimation(
+    parent: _zoomAnimation,
+    curve: Curves.easeOutCubic,
+  );
   Matrix4Tween? _zoomTween;
   TapDownDetails? _doubleTap;
   bool _multiTouch = false;
@@ -223,8 +245,10 @@ class _ZoomablePhotoState extends State<_ZoomablePhoto>
                 child: child,
               ),
               errorBuilder: (_, _, _) => const Center(
-                child: Text("Couldn't load this photo.",
-                    style: TextStyle(color: Colors.white70)),
+                child: Text(
+                  "Couldn't load this photo.",
+                  style: TextStyle(color: Colors.white70),
+                ),
               ),
             ),
           ],

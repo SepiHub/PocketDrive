@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:crypto/crypto.dart';
@@ -20,12 +21,14 @@ class ThumbnailCache {
   final PcClient client;
   Directory? _dir;
 
-  Future<Directory> _cacheDir() async =>
-      _dir ??= await Directory('${(await getApplicationCacheDirectory()).path}'
-              '/thumbs/${client.pairing.pcId}')
-          .create(recursive: true);
+  Future<Directory> _cacheDir() async => _dir ??= await Directory(
+    '${(await getApplicationCacheDirectory()).path}'
+    '/thumbs/${client.pairing.pcId}',
+  ).create(recursive: true);
 
   /// Thumbnail bytes for [path] at [size]; null if the PC has no preview.
+  /// [size] 0 means the original file (used for animated GIFs, which a
+  /// JPEG preview would freeze).
   /// [modified] is part of the cache key, so edited files get new previews.
   Future<Uint8List?> get(String path, DateTime modified, int size) async {
     final key = sha1
@@ -33,7 +36,9 @@ class ThumbnailCache {
         .toString();
     final file = File('${(await _cacheDir()).path}/$key.jpg');
     if (await file.exists()) return file.readAsBytes();
-    final bytes = await client.thumbnail(path, size);
+    final bytes = size == 0
+        ? await _original(path)
+        : await client.thumbnail(path, size);
     if (bytes != null) {
       final tmp = File('${file.path}.tmp');
       await tmp.writeAsBytes(bytes);
@@ -41,7 +46,19 @@ class ThumbnailCache {
     }
     return bytes;
   }
+
+  Future<Uint8List?> _original(String path) async {
+    final res = await client.openFile(path);
+    final bytes = await res.fold<BytesBuilder>(
+      BytesBuilder(copy: false),
+      (b, d) => b..add(d),
+    );
+    if (res.statusCode == 401) throw const NotPaired();
+    return res.statusCode == 200 ? bytes.takeBytes() : null;
+  }
 }
+
+bool isGif(String name) => name.toLowerCase().endsWith('.gif');
 
 /// The file has no preview on the PC (e.g. a document).
 class NoPreview implements Exception {
@@ -86,6 +103,10 @@ class PcImage extends ImageProvider<PcImage> {
       other.size == size;
 
   @override
-  int get hashCode => Object.hash(cache.client.pairing.pcId, entryPath,
-      entry.modified.millisecondsSinceEpoch, size);
+  int get hashCode => Object.hash(
+    cache.client.pairing.pcId,
+    entryPath,
+    entry.modified.millisecondsSinceEpoch,
+    size,
+  );
 }

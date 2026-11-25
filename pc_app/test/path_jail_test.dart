@@ -51,15 +51,21 @@ void main() {
   group('links that leave the folder are blocked', () {
     test('junction to an outside folder', () async {
       await expectLater(
-          jail.resolveExisting('escape'), throwsA(isA<PathRejected>()));
-      await expectLater(jail.resolveExisting('escape/secret.txt'),
-          throwsA(isA<PathRejected>()));
+        jail.resolveExisting('escape'),
+        throwsA(isA<PathRejected>()),
+      );
+      await expectLater(
+        jail.resolveExisting('escape/secret.txt'),
+        throwsA(isA<PathRejected>()),
+      );
       await expectLater(jail.list('escape'), throwsA(isA<PathRejected>()));
     });
 
     test('file symlink to an outside file', () async {
       await expectLater(
-          jail.resolveExisting('link.txt'), throwsA(isA<PathRejected>()));
+        jail.resolveExisting('link.txt'),
+        throwsA(isA<PathRejected>()),
+      );
     }, skip: !_symlinksWork() ? 'symlinks need Developer Mode' : false);
   });
 
@@ -70,8 +76,10 @@ void main() {
 
     test('a file and a nested file', () async {
       expect(await jail.resolveExisting('a.txt'), p.join(jail.root, 'a.txt'));
-      expect(await jail.resolveExisting('sub/b.txt'),
-          p.join(jail.root, 'sub', 'b.txt'));
+      expect(
+        await jail.resolveExisting('sub/b.txt'),
+        p.join(jail.root, 'sub', 'b.txt'),
+      );
     });
 
     test('different letter case (Windows ignores case)', () async {
@@ -80,42 +88,53 @@ void main() {
     });
 
     test('junction that stays inside resolves to its real target', () async {
-      expect(await jail.resolveExisting('inner/b.txt'),
-          p.join(jail.root, 'sub', 'b.txt'));
+      expect(
+        await jail.resolveExisting('inner/b.txt'),
+        p.join(jail.root, 'sub', 'b.txt'),
+      );
     });
 
     test('symlink that stays inside', () async {
-      expect(await jail.resolveExisting('okLink.txt'),
-          p.join(jail.root, 'a.txt'));
+      expect(
+        await jail.resolveExisting('okLink.txt'),
+        p.join(jail.root, 'a.txt'),
+      );
     }, skip: !_symlinksWork() ? 'symlinks need Developer Mode' : false);
 
     test('missing file is not found, not an error', () async {
       await expectLater(
-          jail.resolveExisting('nope.txt'), throwsA(isA<PathNotFound>()));
+        jail.resolveExisting('nope.txt'),
+        throwsA(isA<PathNotFound>()),
+      );
     });
 
-    test('sharing a folder through a junction still jails correctly',
-        () async {
+    test('sharing a folder through a junction still jails correctly', () async {
       final viaLink = await PathJail.open(f.rootLink);
       expect(viaLink.root, jail.root);
-      await expectLater(viaLink.resolveExisting('escape/secret.txt'),
-          throwsA(isA<PathRejected>()));
-      expect(await viaLink.resolveExisting('a.txt'),
-          p.join(jail.root, 'a.txt'));
+      await expectLater(
+        viaLink.resolveExisting('escape/secret.txt'),
+        throwsA(isA<PathRejected>()),
+      );
+      expect(
+        await viaLink.resolveExisting('a.txt'),
+        p.join(jail.root, 'a.txt'),
+      );
     });
   });
 
   group('listing', () {
-    test('shows normal entries, hides links out, hidden and partial files',
-        () async {
-      final names = [for (final e in await jail.list('')) e.name];
-      expect(names, containsAllInOrder(['inner', 'sub', 'a.txt']));
-      expect(names, isNot(contains('escape')));
-      expect(names, isNot(contains('link.txt')));
-      expect(names, isNot(contains('.hidden')));
-      expect(names, isNot(contains('Thumbs.db')));
-      expect(names, isNot(contains('upload.mp4.partial')));
-    });
+    test(
+      'shows normal entries, hides links out, hidden and partial files',
+      () async {
+        final names = [for (final e in await jail.list('')) e.name];
+        expect(names, containsAllInOrder(['inner', 'sub', 'a.txt']));
+        expect(names, isNot(contains('escape')));
+        expect(names, isNot(contains('link.txt')));
+        expect(names, isNot(contains('.hidden')));
+        expect(names, isNot(contains('Thumbs.db')));
+        expect(names, isNot(contains('upload.mp4.partial')));
+      },
+    );
 
     test('folders come first and have size 0', () async {
       final entries = await jail.list('');

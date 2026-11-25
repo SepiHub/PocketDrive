@@ -58,7 +58,10 @@ class PcIdentity {
   final priv = pair.privateKey as RSAPrivateKey;
   final pub = pair.publicKey as RSAPublicKey;
   final csr = X509Utils.generateRsaCsrPem(
-      {'CN': 'PocketDrive $pcId', 'O': 'PocketDrive'}, priv, pub);
+    {'CN': 'PocketDrive $pcId', 'O': 'PocketDrive'},
+    priv,
+    pub,
+  );
   // The phone pins this exact certificate, so a long lifetime is fine.
   final serial = BigInt.parse(randomHex(16), radix: 16).toString();
   final cert = X509Utils.generateSelfSignedCertificate(
@@ -79,6 +82,6 @@ String randomToken(int bytes) => base64Url
     .replaceAll('=', '');
 
 String randomHex(int bytes) => [
-      for (var i = 0; i < bytes; i++)
-        _random.nextInt(256).toRadixString(16).padLeft(2, '0')
-    ].join();
+  for (var i = 0; i < bytes; i++)
+    _random.nextInt(256).toRadixString(16).padLeft(2, '0'),
+].join();

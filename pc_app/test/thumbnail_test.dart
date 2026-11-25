@@ -61,10 +61,12 @@ void main() {
     late String token;
 
     setUpAll(() async {
-      final identity =
-          await PcIdentity.loadOrCreate(Directory(p.join(f.base.path, 'id')));
-      final devices =
-          await DeviceStore.load(File(p.join(f.base.path, 'dev.json')));
+      final identity = await PcIdentity.loadOrCreate(
+        Directory(p.join(f.base.path, 'id')),
+      );
+      final devices = await DeviceStore.load(
+        File(p.join(f.base.path, 'dev.json')),
+      );
       (_, token) = await devices.add('Test');
       await server.start(
         folder: f.share,
@@ -83,8 +85,9 @@ void main() {
     });
 
     Future<(int, List<int>, String?)> get(String q, {bool auth = true}) async {
-      final req = await client
-          .getUrl(Uri.parse('https://127.0.0.1:${server.port}$q'));
+      final req = await client.getUrl(
+        Uri.parse('https://127.0.0.1:${server.port}$q'),
+      );
       if (auth) req.headers.set(Api.authHeader, Api.bearer(token));
       final res = await req.close();
       final bytes = await res.fold<List<int>>([], (a, b) => a..addAll(b));
@@ -92,8 +95,9 @@ void main() {
     }
 
     test('returns a JPEG', () async {
-      final (status, bytes, type) =
-          await get('${Api.thumb}?path=photo.jpg&size=256');
+      final (status, bytes, type) = await get(
+        '${Api.thumb}?path=photo.jpg&size=256',
+      );
       expect(status, 200);
       expect(type, 'image/jpeg');
       expect(img.decodeJpg(Uint8List.fromList(bytes)), isNotNull);
@@ -105,8 +109,10 @@ void main() {
       expect(jsonDecode(utf8.decode(r.$2)), {'error': ApiError.noThumbnail});
       expect((await get('${Api.thumb}?path=sub')).$1, 400);
       expect((await get('${Api.thumb}?path=escape%2Fsecret.txt')).$1, 400);
-      expect((await get('${Api.thumb}?path=..%2Foutside%2Fsecret.txt')).$1,
-          400);
+      expect(
+        (await get('${Api.thumb}?path=..%2Foutside%2Fsecret.txt')).$1,
+        400,
+      );
       expect((await get('${Api.thumb}?path=photo.jpg', auth: false)).$1, 401);
     });
   });

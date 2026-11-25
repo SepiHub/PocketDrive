@@ -26,26 +26,25 @@ class PairedDevice {
   DateTime? lastSeen;
 
   Map<String, Object?> toJson() => {
-        'id': id,
-        'name': name,
-        'tokenHash': tokenHash,
-        'pairedAt': pairedAt.toIso8601String(),
-        'lastSeen': lastSeen?.toIso8601String(),
-      };
+    'id': id,
+    'name': name,
+    'tokenHash': tokenHash,
+    'pairedAt': pairedAt.toIso8601String(),
+    'lastSeen': lastSeen?.toIso8601String(),
+  };
 
   factory PairedDevice.fromJson(Map<String, Object?> j) => PairedDevice(
-        id: j['id'] as String,
-        name: j['name'] as String,
-        tokenHash: j['tokenHash'] as String,
-        pairedAt: DateTime.parse(j['pairedAt'] as String),
-        lastSeen: j['lastSeen'] == null
-            ? null
-            : DateTime.parse(j['lastSeen'] as String),
-      );
+    id: j['id'] as String,
+    name: j['name'] as String,
+    tokenHash: j['tokenHash'] as String,
+    pairedAt: DateTime.parse(j['pairedAt'] as String),
+    lastSeen: j['lastSeen'] == null
+        ? null
+        : DateTime.parse(j['lastSeen'] as String),
+  );
 }
 
-String hashToken(String token) =>
-    sha256.convert(utf8.encode(token)).toString();
+String hashToken(String token) => sha256.convert(utf8.encode(token)).toString();
 
 /// Paired devices, saved in `devices.json`.
 class DeviceStore {
@@ -124,8 +123,8 @@ class DeviceStore {
 /// A short window in which one phone may pair, opened from the PC's UI.
 class PairingWindow {
   PairingWindow({this.lifetime = const Duration(minutes: 5)})
-      : code = randomToken(16),
-        _expires = DateTime.now().add(lifetime);
+    : code = randomToken(16),
+      _expires = DateTime.now().add(lifetime);
 
   static const maxFailedAttempts = 5;
 

@@ -7,8 +7,15 @@ import 'package:pocketdrive_shared/pocketdrive_shared.dart';
 void main() {
   test('local network addresses', () {
     for (final a in [
-      '127.0.0.1', '10.0.0.229', '172.16.0.1', '172.31.255.255',
-      '192.168.1.20', '169.254.3.4', '::1', 'fe80::1', 'fd12::1',
+      '127.0.0.1',
+      '10.0.0.229',
+      '172.16.0.1',
+      '172.31.255.255',
+      '192.168.1.20',
+      '169.254.3.4',
+      '::1',
+      'fe80::1',
+      'fd12::1',
       '::ffff:192.168.1.5',
     ]) {
       expect(isLocalNetworkAddress(InternetAddress(a)), isTrue, reason: a);
@@ -17,8 +24,14 @@ void main() {
 
   test('internet addresses are not local', () {
     for (final a in [
-      '8.8.8.8', '172.15.0.1', '172.32.0.1', '192.169.0.1', '11.0.0.1',
-      '100.64.0.1', '2001:4860::8888', '::ffff:8.8.8.8',
+      '8.8.8.8',
+      '172.15.0.1',
+      '172.32.0.1',
+      '192.169.0.1',
+      '11.0.0.1',
+      '100.64.0.1',
+      '2001:4860::8888',
+      '::ffff:8.8.8.8',
     ]) {
       expect(isLocalNetworkAddress(InternetAddress(a)), isFalse, reason: a);
     }

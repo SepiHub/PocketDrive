@@ -12,12 +12,12 @@ bool isLocalNetworkAddress(InternetAddress a) {
   }
   if (a.type == InternetAddressType.IPv6) {
     // IPv4-mapped (::ffff:a.b.c.d)
-    final mapped = b.sublist(0, 10).every((x) => x == 0) &&
-        b[10] == 0xff &&
-        b[11] == 0xff;
+    final mapped =
+        b.sublist(0, 10).every((x) => x == 0) && b[10] == 0xff && b[11] == 0xff;
     if (mapped) {
       return isLocalNetworkAddress(
-          InternetAddress.fromRawAddress(b.sublist(12)));
+        InternetAddress.fromRawAddress(b.sublist(12)),
+      );
     }
     return (b[0] & 0xfe) == 0xfc; // fc00::/7
   }
@@ -28,13 +28,25 @@ bool isLocalNetworkAddress(InternetAddress a) {
 /// first (virtual adapters for WSL, Hyper-V, VPNs etc. last).
 Future<List<String>> localIpv4Addresses() async {
   final interfaces = await NetworkInterface.list(
-      type: InternetAddressType.IPv4, includeLinkLocal: false);
+    type: InternetAddressType.IPv4,
+    includeLinkLocal: false,
+  );
   final scored = <(int, String)>[];
   for (final nic in interfaces) {
     final name = nic.name.toLowerCase();
-    final virtual = ['vethernet', 'virtual', 'vmware', 'vbox', 'hyper-v',
-            'wsl', 'docker', 'tailscale', 'zerotier', 'vpn', 'loopback']
-        .any(name.contains);
+    final virtual = [
+      'vethernet',
+      'virtual',
+      'vmware',
+      'vbox',
+      'hyper-v',
+      'wsl',
+      'docker',
+      'tailscale',
+      'zerotier',
+      'vpn',
+      'loopback',
+    ].any(name.contains);
     for (final addr in nic.addresses) {
       if (addr.isLoopback || !isLocalNetworkAddress(addr)) continue;
       final b = addr.rawAddress;

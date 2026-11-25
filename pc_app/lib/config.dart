@@ -29,7 +29,9 @@ class AppConfig {
     await dataDir.create(recursive: true);
     final tmp = File('${_file.path}.tmp');
     await tmp.writeAsString(
-        const JsonEncoder.withIndent('  ').convert({'sharedFolder': sharedFolder}));
+      const JsonEncoder.withIndent('  ')
+          .convert({'sharedFolder': sharedFolder}),
+    );
     await tmp.rename(_file.path);
   }
 }
@@ -41,7 +43,10 @@ String? checkShareableFolder(String folder) {
     return 'Pick a specific folder, not a whole drive.';
   }
   final windir = Platform.environment['SystemRoot'];
-  if (windir != null && (p.equals(windir, full) || p.isWithin(windir, full) || p.isWithin(full, windir))) {
+  if (windir != null &&
+      (p.equals(windir, full) ||
+          p.isWithin(windir, full) ||
+          p.isWithin(full, windir))) {
     return 'That folder contains Windows system files. Pick another one.';
   }
   final profile = Platform.environment['USERPROFILE'];

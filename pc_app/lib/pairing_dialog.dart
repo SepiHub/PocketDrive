@@ -68,8 +68,10 @@ class _PairingDialogState extends State<PairingDialog> {
             else
               const Padding(
                 padding: EdgeInsets.all(32),
-                child: Text('This code has expired or was used up. '
-                    'Close and try again.'),
+                child: Text(
+                  'This code has expired or was used up. '
+                  'Close and try again.',
+                ),
               ),
             const SizedBox(height: 12),
             Text(

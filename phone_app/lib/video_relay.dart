@@ -7,7 +7,10 @@ import 'package:pocketdrive_shared/pocketdrive_shared.dart';
 
 /// Opens a file on the PC: (path, Range header or null, method) -> response.
 typedef FileOpener = Future<HttpClientResponse> Function(
-    String path, String? range, String method);
+  String path,
+  String? range,
+  String method,
+);
 
 /// A tiny HTTP server on the phone itself (127.0.0.1) that feeds videos to
 /// Android's video player.
@@ -67,7 +70,8 @@ class VideoRelay {
     final res = req.response;
     try {
       final segments = req.uri.pathSegments;
-      final ok = segments.length == 2 &&
+      final ok =
+          segments.length == 2 &&
           constantTimeEquals(segments[0], _secret) &&
           segments[1] == 'file' &&
           (req.method == 'GET' || req.method == 'HEAD');
@@ -77,8 +81,11 @@ class VideoRelay {
         await res.close();
         return;
       }
-      final upstream =
-          await _open(path, req.headers.value(HttpHeaders.rangeHeader), req.method);
+      final upstream = await _open(
+        path,
+        req.headers.value(HttpHeaders.rangeHeader),
+        req.method,
+      );
       res.statusCode = upstream.statusCode;
       for (final h in const [
         HttpHeaders.contentTypeHeader,

@@ -28,7 +28,9 @@ class PocketDriveApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(colorSchemeSeed: Colors.teal),
       darkTheme: ThemeData(
-          colorSchemeSeed: Colors.teal, brightness: Brightness.dark),
+        colorSchemeSeed: Colors.teal,
+        brightness: Brightness.dark,
+      ),
       home: const HomePage(),
     );
   }
@@ -44,10 +46,15 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final _server = PocketServer();
   final _paired = StreamController<PairedDevice>.broadcast();
-  final _thumbs = ThumbnailService(Directory(p.join(
-      Platform.environment['LOCALAPPDATA'] ?? AppConfig.dataDir.path,
-      'PocketDrive',
-      'thumbs')));
+  final _thumbs = ThumbnailService(
+    Directory(
+      p.join(
+        Platform.environment['LOCALAPPDATA'] ?? AppConfig.dataDir.path,
+        'PocketDrive',
+        'thumbs',
+      ),
+    ),
+  );
   AppConfig? _config;
   PcIdentity? _identity;
   DeviceStore? _devices;
@@ -70,13 +77,16 @@ class _HomePageState extends State<HomePage> {
       final config = await AppConfig.load();
       setState(() {
         _config = config;
-        _status = 'Preparing this PC\'s security certificate '
+        _status =
+            'Preparing this PC\'s security certificate '
             '(first start only, a few seconds)…';
       });
       final identity = await PcIdentity.loadOrCreate(
-          Directory(p.join(AppConfig.dataDir.path, 'identity')));
+        Directory(p.join(AppConfig.dataDir.path, 'identity')),
+      );
       final devices = await DeviceStore.load(
-          File(p.join(AppConfig.dataDir.path, 'devices.json')));
+        File(p.join(AppConfig.dataDir.path, 'devices.json')),
+      );
       _devicesSub = devices.changes.listen((_) {
         if (mounted) setState(() {});
       });
@@ -132,7 +142,8 @@ class _HomePageState extends State<HomePage> {
         log: debugPrint,
       );
     } on SocketException catch (e) {
-      _error = 'Could not start the server (is PocketDrive already running?): '
+      _error =
+          'Could not start the server (is PocketDrive already running?): '
           '${e.osError?.message ?? e.message}';
     } on Object catch (e) {
       _error = 'Could not start the server: $e';
@@ -171,8 +182,8 @@ class _HomePageState extends State<HomePage> {
     window.close();
     _pairing = null;
     if (device != null && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Paired with ${device.name}')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Paired with ${device.name}')));
     }
   }
 
@@ -181,15 +192,19 @@ class _HomePageState extends State<HomePage> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Remove ${d.name}?'),
-        content: const Text('It will no longer be able to connect. '
-            'You can pair it again later.'),
+        content: const Text(
+          'It will no longer be able to connect. '
+          'You can pair it again later.',
+        ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Remove')),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Remove'),
+          ),
         ],
       ),
     );
@@ -206,11 +221,14 @@ class _HomePageState extends State<HomePage> {
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              if (_error == null) const CircularProgressIndicator(),
-              const SizedBox(height: 16),
-              Text(_error ?? _status, textAlign: TextAlign.center),
-            ]),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (_error == null) const CircularProgressIndicator(),
+                const SizedBox(height: 16),
+                Text(_error ?? _status, textAlign: TextAlign.center),
+              ],
+            ),
           ),
         ),
       );
@@ -229,7 +247,8 @@ class _HomePageState extends State<HomePage> {
               trailing: FilledButton.tonal(
                 onPressed: _busy ? null : _chooseFolder,
                 child: Text(
-                    config.sharedFolder == null ? 'Choose folder…' : 'Change…'),
+                  config.sharedFolder == null ? 'Choose folder…' : 'Change…',
+                ),
               ),
             ),
           ),
@@ -241,13 +260,16 @@ class _HomePageState extends State<HomePage> {
                 color: _server.isRunning ? Colors.green : null,
               ),
               title: Text(
-                  _server.isRunning ? 'Sharing (encrypted)' : 'Not sharing'),
-              subtitle: Text(_server.isRunning
-                  ? 'Paired phones on your home network can connect '
-                      '(port ${_server.port}).'
-                  : config.sharedFolder == null
-                      ? 'Choose a folder to start sharing.'
-                      : 'Stopped.'),
+                _server.isRunning ? 'Sharing (encrypted)' : 'Not sharing',
+              ),
+              subtitle: Text(
+                _server.isRunning
+                    ? 'Paired phones on your home network can connect '
+                          '(port ${_server.port}).'
+                    : config.sharedFolder == null
+                    ? 'Choose a folder to start sharing.'
+                    : 'Stopped.',
+              ),
               trailing: config.sharedFolder == null
                   ? null
                   : OutlinedButton(
@@ -263,24 +285,29 @@ class _HomePageState extends State<HomePage> {
             Card(
               color: theme.colorScheme.errorContainer,
               child: ListTile(
-                leading: Icon(Icons.error_outline,
-                    color: theme.colorScheme.onErrorContainer),
-                title: Text(_error!,
-                    style:
-                        TextStyle(color: theme.colorScheme.onErrorContainer)),
+                leading: Icon(
+                  Icons.error_outline,
+                  color: theme.colorScheme.onErrorContainer,
+                ),
+                title: Text(
+                  _error!,
+                  style: TextStyle(color: theme.colorScheme.onErrorContainer),
+                ),
               ),
             ),
           ],
           const SizedBox(height: 16),
-          Row(children: [
-            Text('Paired phones', style: theme.textTheme.titleMedium),
-            const Spacer(),
-            FilledButton.icon(
-              onPressed: _server.isRunning ? _pairPhone : null,
-              icon: const Icon(Icons.qr_code_2),
-              label: const Text('Pair a phone'),
-            ),
-          ]),
+          Row(
+            children: [
+              Text('Paired phones', style: theme.textTheme.titleMedium),
+              const Spacer(),
+              FilledButton.icon(
+                onPressed: _server.isRunning ? _pairPhone : null,
+                icon: const Icon(Icons.qr_code_2),
+                label: const Text('Pair a phone'),
+              ),
+            ],
+          ),
           const SizedBox(height: 8),
           if (devices.isEmpty)
             Padding(
@@ -292,8 +319,10 @@ class _HomePageState extends State<HomePage> {
               child: ListTile(
                 leading: const Icon(Icons.smartphone),
                 title: Text(d.name),
-                subtitle: Text('Paired ${_date(d.pairedAt)}'
-                    '${d.lastSeen == null ? '' : ' · last seen ${_date(d.lastSeen!)}'}'),
+                subtitle: Text(
+                  'Paired ${_date(d.pairedAt)}'
+                  '${d.lastSeen == null ? '' : ' · last seen ${_date(d.lastSeen!)}'}',
+                ),
                 trailing: IconButton(
                   tooltip: 'Remove',
                   icon: const Icon(Icons.delete_outline),

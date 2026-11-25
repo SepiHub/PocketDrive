@@ -27,8 +27,9 @@ void main() {
 
   setUpAll(() async {
     f = await Fixture.create();
-    identity =
-        await PcIdentity.loadOrCreate(Directory(p.join(f.base.path, 'id')));
+    identity = await PcIdentity.loadOrCreate(
+      Directory(p.join(f.base.path, 'id')),
+    );
     devices = await DeviceStore.load(File(p.join(f.base.path, 'dev.json')));
     (_, token) = await devices.add('Test phone');
     await server.start(
@@ -78,16 +79,20 @@ void main() {
   Future<Res> get(String q, {Map<String, String> headers = const {}}) =>
       send('GET', q, headers: headers);
 
-  Future<Res> pair(String code) => send('POST', Api.pair,
-      noAuth: true,
-      body: jsonEncode(PairRequest(code: code, deviceName: 'New phone')));
+  Future<Res> pair(String code) => send(
+    'POST',
+    Api.pair,
+    noAuth: true,
+    body: jsonEncode(PairRequest(code: code, deviceName: 'New phone')),
+  );
 
   group('files', () {
     test('lists the shared folder', () async {
       final r = await get('${Api.list}?path=');
       expect(r.status, 200);
-      final listing =
-          Listing.fromJson(jsonDecode(r.body) as Map<String, Object?>);
+      final listing = Listing.fromJson(
+        jsonDecode(r.body) as Map<String, Object?>,
+      );
       expect(listing.entries.map((e) => e.name), contains('a.txt'));
       expect(listing.entries.map((e) => e.name), isNot(contains('escape')));
     });
@@ -102,8 +107,10 @@ void main() {
     });
 
     test('serves byte ranges', () async {
-      var r = await get('${Api.file}?path=a.txt',
-          headers: {'range': 'bytes=0-4'});
+      var r = await get(
+        '${Api.file}?path=a.txt',
+        headers: {'range': 'bytes=0-4'},
+      );
       expect(r.status, 206);
       expect(r.body, 'hello');
       expect(r.headers['content-range'], 'bytes 0-4/11');
@@ -150,13 +157,19 @@ void main() {
     test('info works with a valid token', () async {
       final r = await get(Api.info);
       expect(r.status, 200);
-      expect(PcInfo.fromJson(jsonDecode(r.body) as Map<String, Object?>).pcId,
-          identity.pcId);
+      expect(
+        PcInfo.fromJson(jsonDecode(r.body) as Map<String, Object?>).pcId,
+        identity.pcId,
+      );
     });
 
-    test('missing, wrong or malformed tokens are refused everywhere',
-        () async {
-      for (final path in [Api.info, '${Api.list}?path=', '${Api.file}?path=a.txt', '/api/unknown']) {
+    test('missing, wrong or malformed tokens are refused everywhere', () async {
+      for (final path in [
+        Api.info,
+        '${Api.list}?path=',
+        '${Api.file}?path=a.txt',
+        '/api/unknown',
+      ]) {
         for (final auth in <String?>[
           null,
           Api.bearer('wrong'),
@@ -180,8 +193,7 @@ void main() {
     });
 
     test('the PC stores only token hashes', () async {
-      final saved =
-          await File(p.join(f.base.path, 'dev.json')).readAsString();
+      final saved = await File(p.join(f.base.path, 'dev.json')).readAsString();
       expect(saved, isNot(contains(token)));
       expect(saved, contains(hashToken(token)));
     });
@@ -200,12 +212,15 @@ void main() {
       expect((await pair('wrong')).status, 403);
       final r = await pair(window!.code);
       expect(r.status, 200);
-      final res = PairResponse.fromJson(jsonDecode(r.body) as Map<String, Object?>);
+      final res = PairResponse.fromJson(
+        jsonDecode(r.body) as Map<String, Object?>,
+      );
       expect(res.pcId, identity.pcId);
       expect(paired.last.name, 'New phone');
       expect(
-          (await send('GET', Api.info, auth: Api.bearer(res.token))).status,
-          200);
+        (await send('GET', Api.info, auth: Api.bearer(res.token))).status,
+        200,
+      );
       // Single use.
       expect((await pair(window!.code)).status, 403);
     });
@@ -226,18 +241,22 @@ void main() {
     test('bad request bodies', () async {
       window = PairingWindow();
       expect(
-          (await send('POST', Api.pair, noAuth: true, body: 'not json'))
-              .status,
-          400);
+        (await send('POST', Api.pair, noAuth: true, body: 'not json')).status,
+        400,
+      );
       // Oversized: the server answers 400 before reading it all, which may
       // also show up as a dropped connection. Either way, nothing is paired.
-      final big = HttpClient(
-          context: SecurityContext(withTrustedRoots: false))
+      final big = HttpClient(context: SecurityContext(withTrustedRoots: false))
         ..badCertificateCallback = (c, h, p) => true;
       addTearDown(() => big.close(force: true));
       try {
-        final r = await send('POST', Api.pair,
-            noAuth: true, body: 'x' * 500000, using: big);
+        final r = await send(
+          'POST',
+          Api.pair,
+          noAuth: true,
+          body: 'x' * 500000,
+          using: big,
+        );
         expect(r.status, 400);
       } on IOException {
         // connection closed early: fine
@@ -250,30 +269,40 @@ void main() {
     test('a client pinned to another fingerprint cannot connect', () async {
       final other = pinnedHttpClient('A' * 43);
       addTearDown(() => other.close(force: true));
-      await expectLater(send('GET', Api.info, using: other),
-          throwsA(isA<HandshakeException>()));
+      await expectLater(
+        send('GET', Api.info, using: other),
+        throwsA(isA<HandshakeException>()),
+      );
     });
 
-    test('a normal client does not trust the self-signed certificate',
-        () async {
-      final normal = HttpClient();
-      addTearDown(() => normal.close(force: true));
-      await expectLater(send('GET', Api.info, using: normal),
-          throwsA(isA<HandshakeException>()));
-    });
+    test(
+      'a normal client does not trust the self-signed certificate',
+      () async {
+        final normal = HttpClient();
+        addTearDown(() => normal.close(force: true));
+        await expectLater(
+          send('GET', Api.info, using: normal),
+          throwsA(isA<HandshakeException>()),
+        );
+      },
+    );
 
     test('plain HTTP is not served', () async {
       final plain = HttpClient();
       addTearDown(() => plain.close(force: true));
-      final req =
-          await plain.getUrl(Uri.parse('http://127.0.0.1:${server.port}/api/info'));
+      final req = await plain.getUrl(
+        Uri.parse('http://127.0.0.1:${server.port}/api/info'),
+      );
       await expectLater(
-          req.close().then((r) => r.drain<void>()), throwsA(anything));
+        req.close().then((r) => r.drain<void>()),
+        throwsA(anything),
+      );
     });
 
     test('identity is stable across restarts', () async {
-      final again =
-          await PcIdentity.loadOrCreate(Directory(p.join(f.base.path, 'id')));
+      final again = await PcIdentity.loadOrCreate(
+        Directory(p.join(f.base.path, 'id')),
+      );
       expect(again.fingerprint, identity.fingerprint);
       expect(again.pcId, identity.pcId);
     });

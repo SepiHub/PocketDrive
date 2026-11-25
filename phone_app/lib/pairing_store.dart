@@ -28,24 +28,24 @@ class PcPairing {
   String? lastHost;
 
   Map<String, Object?> toJson() => {
-        'pcId': pcId,
-        'pcName': pcName,
-        'hosts': hosts,
-        'port': port,
-        'fingerprint': fingerprint,
-        'token': token,
-        'lastHost': lastHost,
-      };
+    'pcId': pcId,
+    'pcName': pcName,
+    'hosts': hosts,
+    'port': port,
+    'fingerprint': fingerprint,
+    'token': token,
+    'lastHost': lastHost,
+  };
 
   factory PcPairing.fromJson(Map<String, Object?> j) => PcPairing(
-        pcId: j['pcId'] as String,
-        pcName: j['pcName'] as String,
-        hosts: [for (final h in j['hosts'] as List) h as String],
-        port: j['port'] as int,
-        fingerprint: j['fingerprint'] as String,
-        token: j['token'] as String,
-        lastHost: j['lastHost'] as String?,
-      );
+    pcId: j['pcId'] as String,
+    pcName: j['pcName'] as String,
+    hosts: [for (final h in j['hosts'] as List) h as String],
+    port: j['port'] as int,
+    fingerprint: j['fingerprint'] as String,
+    token: j['token'] as String,
+    lastHost: j['lastHost'] as String?,
+  );
 }
 
 class PairingStore {
@@ -57,7 +57,8 @@ class PairingStore {
     if (raw == null) return null;
     try {
       return PcPairing.fromJson(
-          (jsonDecode(raw) as Map).cast<String, Object?>());
+        (jsonDecode(raw) as Map).cast<String, Object?>(),
+      );
     } on Object {
       return null;
     }

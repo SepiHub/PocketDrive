@@ -5,10 +5,13 @@ import 'package:material_ui/material_ui.dart';
 import 'package:pocketdrive_shared/pocketdrive_shared.dart';
 
 import 'browser_page.dart';
+import 'app_settings.dart';
 import 'pairing_store.dart';
 import 'pc_client.dart';
 import 'scan_page.dart';
+import 'session.dart';
 import 'thumbnails.dart';
+import 'upload_queue.dart';
 import 'video_relay.dart';
 
 void main() {
@@ -24,8 +27,10 @@ class PocketDriveApp extends StatelessWidget {
       title: 'PocketDrive',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(colorSchemeSeed: Colors.teal),
-      darkTheme:
-          ThemeData(colorSchemeSeed: Colors.teal, brightness: Brightness.dark),
+      darkTheme: ThemeData(
+        colorSchemeSeed: Colors.teal,
+        brightness: Brightness.dark,
+      ),
       home: const RootPage(),
     );
   }
@@ -42,15 +47,23 @@ class RootPage extends StatefulWidget {
 class _RootPageState extends State<RootPage> {
   final _store = PairingStore();
   PcPairing? _pairing;
+  AppSettings? _settings;
   bool _loaded = false;
 
   @override
   void initState() {
     super.initState();
-    unawaited(_store.load().then((p) => setState(() {
-          _pairing = p;
-          _loaded = true;
-        })));
+    unawaited(_init());
+  }
+
+  Future<void> _init() async {
+    final pairing = await _store.load();
+    final settings = await AppSettings.load();
+    setState(() {
+      _pairing = pairing;
+      _settings = settings;
+      _loaded = true;
+    });
   }
 
   Future<void> _onPaired(PcPairing p) async {
@@ -73,6 +86,7 @@ class _RootPageState extends State<RootPage> {
     return PcPage(
       key: ValueKey(p.pcId + p.token),
       pairing: p,
+      settings: _settings!,
       onUnpair: _unpair,
       onHostChanged: (h) {
         p.lastHost = h;
@@ -111,10 +125,11 @@ class _SetupPageState extends State<SetupPage> {
     } on PcError catch (e) {
       _error = e.code == ApiError.pairingClosed
           ? 'That code has expired or was already used. On your PC, close '
-              'the pairing window, click "Pair a phone" again and rescan.'
+                'the pairing window, click "Pair a phone" again and rescan.'
           : 'The PC refused pairing ($e).';
     } on PcUnreachable {
-      _error = "Couldn't reach ${qr.pcName}. Check that the phone is on the "
+      _error =
+          "Couldn't reach ${qr.pcName}. Check that the phone is on the "
           'same Wi-Fi as the PC, and that Windows Firewall allows '
           'PocketDrive on private networks.';
     } on Object catch (e) {
@@ -136,13 +151,17 @@ class _SetupPageState extends State<SetupPage> {
         children: [
           Icon(Icons.computer, size: 72, color: theme.colorScheme.primary),
           const SizedBox(height: 16),
-          Text('Pair with your PC',
-              style: theme.textTheme.headlineSmall,
-              textAlign: TextAlign.center),
+          Text(
+            'Pair with your PC',
+            style: theme.textTheme.headlineSmall,
+            textAlign: TextAlign.center,
+          ),
           const SizedBox(height: 16),
-          const Text('1. On your PC, open PocketDrive and click '
-              '"Pair a phone".\n'
-              '2. Tap the button below and point the camera at the code.'),
+          const Text(
+            '1. On your PC, open PocketDrive and click '
+            '"Pair a phone".\n'
+            '2. Tap the button below and point the camera at the code.',
+          ),
           const SizedBox(height: 24),
           FilledButton.icon(
             onPressed: _busy ? null : _scan,
@@ -155,9 +174,10 @@ class _SetupPageState extends State<SetupPage> {
               color: theme.colorScheme.errorContainer,
               child: Padding(
                 padding: const EdgeInsets.all(16),
-                child: Text(_error!,
-                    style:
-                        TextStyle(color: theme.colorScheme.onErrorContainer)),
+                child: Text(
+                  _error!,
+                  style: TextStyle(color: theme.colorScheme.onErrorContainer),
+                ),
               ),
             ),
           ],
@@ -172,11 +192,13 @@ class PcPage extends StatefulWidget {
   const PcPage({
     super.key,
     required this.pairing,
+    required this.settings,
     required this.onUnpair,
     required this.onHostChanged,
   });
 
   final PcPairing pairing;
+  final AppSettings settings;
   final Future<void> Function() onUnpair;
   final void Function(String) onHostChanged;
 
@@ -185,15 +207,27 @@ class PcPage extends StatefulWidget {
 }
 
 class _PcPageState extends State<PcPage> {
-  late final PcClient _client =
-      PcClient(widget.pairing, onHostChanged: widget.onHostChanged);
+  late final PcClient _client = PcClient(
+    widget.pairing,
+    onHostChanged: widget.onHostChanged,
+  );
   late final ThumbnailCache _thumbs = ThumbnailCache(_client);
   late final VideoRelay _relay = VideoRelay(
-      (path, range, method) =>
-          _client.openFile(path, range: range, method: method));
+    (path, range, method) =>
+        _client.openFile(path, range: range, method: method),
+  );
+  late final UploadQueue _uploads = UploadQueue(_client);
+  late final PcSession _session = PcSession(
+    client: _client,
+    thumbs: _thumbs,
+    relay: _relay,
+    uploads: _uploads,
+    settings: widget.settings,
+  );
 
   @override
   void dispose() {
+    _uploads.dispose();
     unawaited(_relay.close());
     _client.close();
     super.dispose();
@@ -207,11 +241,13 @@ class _PcPageState extends State<PcPage> {
         content: const Text('You can pair again by scanning a new code.'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Forget')),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Forget'),
+          ),
         ],
       ),
     );
@@ -221,17 +257,28 @@ class _PcPageState extends State<PcPage> {
   @override
   Widget build(BuildContext context) {
     return BrowserPage(
-      client: _client,
-      thumbs: _thumbs,
-      relay: _relay,
+      session: _session,
       path: '',
       onNotPaired: () {
         Navigator.of(context).popUntil((r) => r.isFirst);
         unawaited(widget.onUnpair());
       },
       menu: PopupMenuButton<String>(
-        onSelected: (_) => _confirmUnpair(),
+        onSelected: (v) {
+          if (v == 'unpair') {
+            unawaited(_confirmUnpair());
+          } else {
+            unawaited(
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => SettingsPage(settings: widget.settings),
+                ),
+              ),
+            );
+          }
+        },
         itemBuilder: (_) => const [
+          PopupMenuItem(value: 'settings', child: Text('Settings')),
           PopupMenuItem(value: 'unpair', child: Text('Forget this PC')),
         ],
       ),

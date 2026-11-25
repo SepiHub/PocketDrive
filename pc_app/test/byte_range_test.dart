@@ -20,12 +20,18 @@ void main() {
   });
 
   test('ranges outside the file are not satisfiable', () {
-    expect(() => parseRange('bytes=1000-', size),
-        throwsA(isA<RangeNotSatisfiable>()));
-    expect(() => parseRange('bytes=-0', size),
-        throwsA(isA<RangeNotSatisfiable>()));
-    expect(() => parseRange('bytes=0-', 0),
-        throwsA(isA<RangeNotSatisfiable>()));
+    expect(
+      () => parseRange('bytes=1000-', size),
+      throwsA(isA<RangeNotSatisfiable>()),
+    );
+    expect(
+      () => parseRange('bytes=-0', size),
+      throwsA(isA<RangeNotSatisfiable>()),
+    );
+    expect(
+      () => parseRange('bytes=0-', 0),
+      throwsA(isA<RangeNotSatisfiable>()),
+    );
   });
 
   test('garbage and multiple ranges fall back to the whole file', () {

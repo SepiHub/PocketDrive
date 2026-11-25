@@ -28,12 +28,28 @@ class PcError implements Exception {
 
 const _timeout = Duration(seconds: 5);
 
+/// The user cancelled an upload.
+class UploadCancelled implements Exception {
+  const UploadCancelled();
+}
+
+/// Lets the UI stop an upload that is in progress.
+class UploadCancel {
+  HttpClientRequest? _request;
+  bool cancelled = false;
+
+  void cancel() {
+    cancelled = true;
+    _request?.abort(const UploadCancelled());
+  }
+}
+
 /// Talks to the paired PC over HTTPS, trusting only its pinned certificate.
 class PcClient {
   PcClient(this.pairing, {this.onHostChanged})
-      : _http = pinnedHttpClient(pairing.fingerprint)
-          // A grid asks for many thumbnails at once; don't flood the PC.
-          ..maxConnectionsPerHost = 6;
+    : _http = pinnedHttpClient(pairing.fingerprint)
+        // A grid asks for many thumbnails at once; don't flood the PC.
+        ..maxConnectionsPerHost = 6;
 
   final PcPairing pairing;
   final void Function(String host)? onHostChanged;
@@ -95,8 +111,9 @@ class PcClient {
     };
     for (final h in candidates) {
       try {
-        final info = PcInfo.fromJson(await _send(_http, 'GET', _uri(h, Api.info),
-            token: pairing.token));
+        final info = PcInfo.fromJson(
+          await _send(_http, 'GET', _uri(h, Api.info), token: pairing.token),
+        );
         if (info.pcId != pairing.pcId) continue;
         _host = h;
         if (h != pairing.lastHost) onHostChanged?.call(h);
@@ -113,14 +130,20 @@ class PcClient {
   Future<PcInfo> info() async {
     final h = await connect();
     return PcInfo.fromJson(
-        await _send(_http, 'GET', _uri(h, Api.info), token: pairing.token));
+      await _send(_http, 'GET', _uri(h, Api.info), token: pairing.token),
+    );
   }
 
   Future<Listing> list(String path) async {
     final h = await connect();
-    return Listing.fromJson(await _send(
-        _http, 'GET', _uri(h, Api.list, {'path': path}),
-        token: pairing.token));
+    return Listing.fromJson(
+      await _send(
+        _http,
+        'GET',
+        _uri(h, Api.list, {'path': path}),
+        token: pairing.token,
+      ),
+    );
   }
 
   /// JPEG thumbnail bytes, or null if the PC has no preview for this file.
@@ -141,11 +164,86 @@ class PcClient {
     return bytes.takeBytes();
   }
 
+  /// Uploads [file] into [folder] as [name]. Reports progress as bytes sent.
+  /// Returns the saved entry (its name may have ` (2)` added).
+  Future<RemoteEntry> upload(
+    String folder,
+    String name,
+    File file, {
+    DateTime? modified,
+    void Function(int sent, int total)? onProgress,
+    UploadCancel? cancel,
+  }) async {
+    final h = await connect();
+    final total = await file.length();
+    final req = await _streamHttp
+        .postUrl(
+          _uri(h, Api.upload, {
+            'path': folder,
+            'name': name,
+            if (modified != null)
+              'modified': '${modified.millisecondsSinceEpoch}',
+          }),
+        )
+        .timeout(_timeout);
+    cancel?._request = req;
+    if (cancel?.cancelled ?? false) req.abort(const UploadCancelled());
+    req.headers.set(Api.authHeader, Api.bearer(pairing.token));
+    req.headers.contentType = ContentType.binary;
+    req.contentLength = total;
+    var sent = 0;
+    try {
+      await req.addStream(
+        file.openRead().map((chunk) {
+          sent += chunk.length;
+          onProgress?.call(sent, total);
+          return chunk;
+        }),
+      );
+      final res = await req.close();
+      final text = await utf8.decodeStream(res).timeout(_timeout);
+      if (res.statusCode == 401) throw const NotPaired();
+      if (res.statusCode != 200) {
+        var code = 'http_${res.statusCode}';
+        try {
+          code = (jsonDecode(text) as Map)['error'] as String;
+        } on Object {
+          // not JSON
+        }
+        throw PcError(res.statusCode, code);
+      }
+      return RemoteEntry.fromJson(
+        (jsonDecode(text) as Map).cast<String, Object?>(),
+      );
+    } on Object {
+      if (cancel?.cancelled ?? false) throw const UploadCancelled();
+      rethrow;
+    } finally {
+      cancel?._request = null;
+    }
+  }
+
+  /// Creates folder [name] inside [parent] on the PC.
+  Future<RemoteEntry> mkdir(String parent, String name) async {
+    final h = await connect();
+    return RemoteEntry.fromJson(
+      await _send(
+        _http,
+        'POST',
+        _uri(h, Api.mkdir, {'path': parent, 'name': name}),
+        token: pairing.token,
+      ),
+    );
+  }
+
   /// Starts downloading a file (or part of it, with a `Range` header) and
   /// returns the response unread, for streaming. Uses its own connection
   /// pool so videos don't wait behind thumbnail requests.
-  Future<HttpClientResponse> openFile(String path,
-      {String? range, String method = 'GET'}) async {
+  Future<HttpClientResponse> openFile(
+    String path, {
+    String? range,
+    String method = 'GET',
+  }) async {
     final h = await connect();
     final req = await _streamHttp
         .openUrl(method, _uri(h, Api.file, {'path': path}))
@@ -156,12 +254,12 @@ class PcClient {
   }
 
   Uri _uri(String host, String path, [Map<String, String>? query]) => Uri(
-        scheme: 'https',
-        host: host,
-        port: pairing.port,
-        path: path,
-        queryParameters: query,
-      );
+    scheme: 'https',
+    host: host,
+    port: pairing.port,
+    path: path,
+    queryParameters: query,
+  );
 
   static Future<Map<String, Object?>> _send(
     HttpClient http,

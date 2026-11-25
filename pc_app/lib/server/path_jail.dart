@@ -20,8 +20,20 @@ class PathNotFound implements Exception {
 /// with any extension (`nul.txt` is the NUL device).
 final _reservedNames = {
   'CON', 'PRN', 'AUX', 'NUL', 'CONIN\$', 'CONOUT\$', //
-  for (final n in ['1', '2', '3', '4', '5', '6', '7', '8', '9', '¹', '²', '³'])
-    ...['COM$n', 'LPT$n'],
+  for (final n in [
+    '1',
+    '2',
+    '3',
+    '4',
+    '5',
+    '6',
+    '7',
+    '8',
+    '9',
+    '¹',
+    '²',
+    '³',
+  ]) ...['COM$n', 'LPT$n'],
 };
 
 /// `:` blocks drive letters and NTFS alternate data streams (`a.txt::$DATA`),
@@ -135,21 +147,25 @@ class PathJail {
       final stat = await FileStat.stat(target);
       switch (stat.type) {
         case FileSystemEntityType.directory:
-          entries.add(RemoteEntry(
-            name: name,
-            type: EntryType.dir,
-            size: 0,
-            modified: stat.modified,
-            kind: MediaKind.other,
-          ));
+          entries.add(
+            RemoteEntry(
+              name: name,
+              type: EntryType.dir,
+              size: 0,
+              modified: stat.modified,
+              kind: MediaKind.other,
+            ),
+          );
         case FileSystemEntityType.file:
-          entries.add(RemoteEntry(
-            name: name,
-            type: EntryType.file,
-            size: stat.size,
-            modified: stat.modified,
-            kind: mediaKindForName(name),
-          ));
+          entries.add(
+            RemoteEntry(
+              name: name,
+              type: EntryType.file,
+              size: stat.size,
+              modified: stat.modified,
+              kind: mediaKindForName(name),
+            ),
+          );
         default:
           continue;
       }
