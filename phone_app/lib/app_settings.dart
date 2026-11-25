@@ -11,6 +11,7 @@ class AppSettings extends ChangeNotifier {
   static const _loopKey = 'video_loop';
   static const _shuffleKey = 'slideshow_shuffle';
   static const _subSizeKey = 'subtitle_size';
+  static const _flippedKey = 'landscape_flipped';
   static const _subsOnKey = 'subtitles_on';
   static const subtitleSizes = {
     'Small': 16.0,
@@ -45,6 +46,15 @@ class AppSettings extends ChangeNotifier {
 
   Future<void> setVideoMuted(bool muted) async {
     await _prefs.setBool(_mutedKey, muted);
+    notifyListeners();
+  }
+
+  /// Which way full-screen video turns: false = one landscape side, true =
+  /// the other (so the charging port can be on either side); remembered.
+  bool get landscapeFlipped => _prefs.getBool(_flippedKey) ?? false;
+
+  Future<void> setLandscapeFlipped(bool flipped) async {
+    await _prefs.setBool(_flippedKey, flipped);
     notifyListeners();
   }
 

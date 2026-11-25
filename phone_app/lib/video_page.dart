@@ -419,15 +419,27 @@ class _VideoPageState extends State<VideoPage> {
     }
   }
 
+  /// Locks full screen to the remembered landscape side.
+  Future<void> _applyLandscapeSide() => SystemChrome.setPreferredOrientations([
+    widget.settings.landscapeFlipped
+        ? DeviceOrientation.landscapeRight
+        : DeviceOrientation.landscapeLeft,
+  ]);
+
+  /// Turns full screen 180° to the other landscape side (and remembers it).
+  Future<void> _flipLandscape() async {
+    await widget.settings.setLandscapeFlipped(
+      !widget.settings.landscapeFlipped,
+    );
+    await _applyLandscapeSide();
+  }
+
   Future<void> _setFullscreen(bool on) async {
     setState(() => _fullscreen = on);
     if (on) {
       // Full screen = landscape, hiding the status and navigation bars.
       await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-      await SystemChrome.setPreferredOrientations([
-        DeviceOrientation.landscapeLeft,
-        DeviceOrientation.landscapeRight,
-      ]);
+      await _applyLandscapeSide();
     } else {
       // Back to portrait; the status bar stays hidden while watching.
       await SystemChrome.setPreferredOrientations([]);
@@ -494,6 +506,7 @@ class _VideoPageState extends State<VideoPage> {
                       onChooseSubtitle: _chooseSubtitle,
                       fullscreen: _fullscreen,
                       onFullscreen: () => _setFullscreen(!_fullscreen),
+                      onFlip: _flipLandscape,
                     )
                   : const Center(child: CircularProgressIndicator()),
             ),
@@ -537,6 +550,7 @@ class _Player extends StatefulWidget {
     required this.onChooseSubtitle,
     required this.fullscreen,
     required this.onFullscreen,
+    required this.onFlip,
   });
 
   final VideoPlayerController video;
@@ -555,6 +569,9 @@ class _Player extends StatefulWidget {
   final Future<void> Function(String?) onChooseSubtitle;
   final bool fullscreen;
   final VoidCallback onFullscreen;
+
+  /// Full screen only: turn to the other landscape side.
+  final VoidCallback onFlip;
 
   @override
   State<_Player> createState() => _PlayerState();
@@ -967,6 +984,7 @@ class _PlayerState extends State<_Player> with SingleTickerProviderStateMixin {
                           : value.buffered.last.end.inMilliseconds.toDouble(),
                       fullscreen: widget.fullscreen,
                       onFullscreen: widget.onFullscreen,
+                      onFlip: widget.onFlip,
                       onScrubStart: (ms) {
                         _hideTimer?.cancel();
                         setState(() => _scrubMs = ms);
@@ -1043,6 +1061,7 @@ class _BottomBar extends StatelessWidget {
     required this.bufferedMs,
     required this.fullscreen,
     required this.onFullscreen,
+    required this.onFlip,
     required this.onScrubStart,
     required this.onScrub,
     required this.onScrubEnd,
@@ -1059,6 +1078,7 @@ class _BottomBar extends StatelessWidget {
   final double bufferedMs;
   final bool fullscreen;
   final VoidCallback onFullscreen;
+  final VoidCallback onFlip;
   final ValueChanged<double> onScrubStart;
   final ValueChanged<double> onScrub;
   final ValueChanged<double> onScrubEnd;
@@ -1156,6 +1176,12 @@ class _BottomBar extends StatelessWidget {
               onMute,
             ),
             button(Icons.settings, 'Playback settings', onSettings),
+            if (fullscreen)
+              button(
+                Icons.screen_rotation_alt,
+                'Flip to the other side',
+                onFlip,
+              ),
             button(
               fullscreen ? Icons.fullscreen_exit : Icons.screen_rotation,
               fullscreen ? 'Exit full screen' : 'Full screen (landscape)',
