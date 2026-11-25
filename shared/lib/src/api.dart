@@ -37,6 +37,14 @@ abstract final class Api {
   /// phone app (nothing changes in Windows).
   static const String hide = '/api/hide';
 
+  /// `GET ?path=<video>` -> `{"available": bool, "tracks": [{"index",
+  /// "codec", "language"?, "title"?, "text"}]}`: subtitle tracks built
+  /// into the video. `available` is false when FFmpeg isn't installed.
+  static const String subtitles = '/api/subtitles';
+
+  /// `GET ?path=<video>&track=<index>` -> that track as WebVTT text.
+  static const String subtitle = '/api/subtitle';
+
   /// `POST ?to=<folder>` with JSON `{"paths": [...]}` -> JSON
   /// `{"moved": [{"from", "name"}], "failed": [{"path", "error"}]}`.
   /// Moved items keep their name unless taken (then ` (2)` is added).
@@ -74,4 +82,5 @@ abstract final class ApiError {
   static const String uploadIncomplete = 'upload_incomplete';
   static const String writeFailed = 'write_failed';
   static const String exists = 'exists';
+  static const String noSubtitle = 'no_subtitle';
 }

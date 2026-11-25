@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:ui' as ui;
 
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
@@ -7,8 +8,170 @@ import 'package:pocketdrive_shared/pocketdrive_shared.dart';
 import 'package:video_player/video_player.dart';
 
 import 'app_settings.dart';
+import 'pc_client.dart';
 import 'thumbnails.dart';
 import 'video_relay.dart';
+
+/// Subtitle files the player understands.
+bool isSubtitleFile(String name) {
+  final n = name.toLowerCase();
+  return n.endsWith('.srt') || n.endsWith('.vtt');
+}
+
+/// Subtitle files that belong to [video]: same name, e.g. for `Movie.mp4`
+/// `Movie.srt`, `Movie.en.srt` or `Movie.English.vtt`.
+List<String> subtitlesFor(String video, List<String> subtitleFiles) {
+  final dot = video.lastIndexOf('.');
+  final stem = (dot > 0 ? video.substring(0, dot) : video).toLowerCase();
+  return [
+    for (final s in subtitleFiles)
+      if (s.toLowerCase().startsWith('$stem.')) s,
+  ]..sort();
+}
+
+/// A short label for a subtitle file ("en", "English", or "Default").
+String subtitleLabel(String video, String file) {
+  final dot = video.lastIndexOf('.');
+  final stem = dot > 0 ? video.substring(0, dot) : video;
+  final rest = file.substring(stem.length + 1);
+  final ext = rest.lastIndexOf('.');
+  final label = ext > 0 ? rest.substring(0, ext) : '';
+  return label.isEmpty ? 'Default' : label;
+}
+
+/// A subtitle choice for a video: a file next to it, or a track inside it.
+class SubOption {
+  const SubOption({
+    required this.id,
+    required this.label,
+    this.detail,
+    this.enabled = true,
+  });
+
+  /// `file:<name>` or `track:<index>`.
+  final String id;
+  final String label;
+  final String? detail;
+  final bool enabled;
+}
+
+const _languages = {
+  'eng': 'English',
+  'fre': 'French',
+  'fra': 'French',
+  'ger': 'German',
+  'deu': 'German',
+  'spa': 'Spanish',
+  'ita': 'Italian',
+  'por': 'Portuguese',
+  'dut': 'Dutch',
+  'nld': 'Dutch',
+  'swe': 'Swedish',
+  'nor': 'Norwegian',
+  'nob': 'Norwegian',
+  'dan': 'Danish',
+  'fin': 'Finnish',
+  'pol': 'Polish',
+  'rus': 'Russian',
+  'ukr': 'Ukrainian',
+  'jpn': 'Japanese',
+  'chi': 'Chinese',
+  'zho': 'Chinese',
+  'kor': 'Korean',
+  'ara': 'Arabic',
+  'tur': 'Turkish',
+  'hun': 'Hungarian',
+  'cze': 'Czech',
+  'ces': 'Czech',
+  'gre': 'Greek',
+  'ell': 'Greek',
+  'heb': 'Hebrew',
+  'rum': 'Romanian',
+  'ron': 'Romanian',
+  'hin': 'Hindi',
+  'tha': 'Thai',
+  'vie': 'Vietnamese',
+  'ind': 'Indonesian',
+  'may': 'Malay',
+  'msa': 'Malay',
+  'bul': 'Bulgarian',
+  'hrv': 'Croatian',
+  'srp': 'Serbian',
+  'slv': 'Slovenian',
+  'slo': 'Slovak',
+  'slk': 'Slovak',
+  'est': 'Estonian',
+  'lav': 'Latvian',
+  'lit': 'Lithuanian',
+  'ice': 'Icelandic',
+  'isl': 'Icelandic',
+  'cat': 'Catalan',
+  'baq': 'Basque',
+  'eus': 'Basque',
+  'glg': 'Galician',
+  'fil': 'Filipino',
+  'per': 'Persian',
+  'fas': 'Persian',
+};
+
+/// "English", "French (Forced)", "Track 3", ...
+String embeddedTrackLabel(EmbeddedTrack t) {
+  final lang = t.language;
+  final name = lang == null || lang == 'und'
+      ? 'Track ${t.index + 1}'
+      : _languages[lang.toLowerCase()] ?? lang.toUpperCase();
+  return t.title == null ? name : '$name (${t.title})';
+}
+
+/// The built-in track to show by default: the phone's language first, and
+/// full subtitles before "forced"/"signs" ones.
+EmbeddedTrack? defaultEmbeddedTrack(List<EmbeddedTrack> tracks, String lang2) {
+  final text = tracks.where((t) => t.isText).toList();
+  if (text.isEmpty) return null;
+  bool mine(EmbeddedTrack t) {
+    final l = (t.language ?? '').toLowerCase();
+    final name = _languages[l]?.toLowerCase() ?? '';
+    return l.startsWith(lang2) || name.startsWith(_lang2Names[lang2] ?? '?');
+  }
+
+  bool partial(EmbeddedTrack t) {
+    final title = (t.title ?? '').toLowerCase();
+    return title.contains('forced') || title.contains('sign');
+  }
+
+  return text.where((t) => mine(t) && !partial(t)).firstOrNull ??
+      text.where(mine).firstOrNull ??
+      text.where((t) => !partial(t)).firstOrNull ??
+      text.first;
+}
+
+const _lang2Names = {
+  'en': 'english',
+  'fr': 'french',
+  'de': 'german',
+  'es': 'spanish',
+  'it': 'italian',
+  'pt': 'portuguese',
+  'nl': 'dutch',
+  'sv': 'swedish',
+  'no': 'norwegian',
+  'nb': 'norwegian',
+  'da': 'danish',
+  'fi': 'finnish',
+  'pl': 'polish',
+  'ru': 'russian',
+  'ja': 'japanese',
+  'zh': 'chinese',
+  'ko': 'korean',
+  'ar': 'arabic',
+  'tr': 'turkish',
+};
+
+/// Strips styling left in converted subtitles: `<i>`, `{\an8}`, ...
+String plainCaption(String text) => text
+    .replaceAll(RegExp(r'<[^>]+>'), '')
+    .replaceAll(RegExp(r'\{\\[^}]*\}'), '')
+    .trim();
 
 /// Plays the videos of one folder from the PC, starting at [initialIndex].
 /// It streams: playback starts after the first few seconds arrive, and
@@ -18,6 +181,8 @@ class VideoPage extends StatefulWidget {
   const VideoPage({
     super.key,
     required this.settings,
+    required this.client,
+    required this.subtitleFiles,
     required this.relay,
     required this.thumbs,
     required this.folder,
@@ -26,6 +191,10 @@ class VideoPage extends StatefulWidget {
   });
 
   final AppSettings settings;
+  final PcClient client;
+
+  /// `.srt`/`.vtt` files in the folder (matched to videos by name).
+  final List<String> subtitleFiles;
   final VideoRelay relay;
   final ThumbnailCache thumbs;
   final String folder;
@@ -48,7 +217,121 @@ class _VideoPageState extends State<VideoPage> {
   /// Which way the last swipe went (+1 next, -1 previous), for the slide.
   int _direction = 0;
 
+  /// The subtitle shown for each video (a [SubOption.id], null = off).
+  final _subtitle = <int, String?>{};
+
+  /// Built-in tracks per video, once the PC answered (FFmpeg present?).
+  final _embedded = <int, ({bool available, List<EmbeddedTrack> tracks})>{};
+  final _subLoading = <int>{};
+
   RemoteEntry get _entry => widget.videos[_index];
+
+  List<String> _tracks(int i) =>
+      subtitlesFor(widget.videos[i].name, widget.subtitleFiles);
+
+  String _inFolder(String name) =>
+      widget.folder.isEmpty ? name : '${widget.folder}/$name';
+
+  /// Everything that can be chosen in ⚙ > Subtitles for video [i].
+  List<SubOption> _options(int i) {
+    final name = widget.videos[i].name;
+    return [
+      for (final f in _tracks(i))
+        SubOption(id: 'file:$f', label: subtitleLabel(name, f), detail: f),
+      for (final t in _embedded[i]?.tracks ?? const <EmbeddedTrack>[])
+        SubOption(
+          id: 'track:${t.index}',
+          label: embeddedTrackLabel(t),
+          detail: t.isText
+              ? 'Built into the video'
+              : "Picture-based: can't be shown",
+          enabled: t.isText,
+        ),
+    ];
+  }
+
+  /// A short note about built-in subtitles (still looking / no FFmpeg).
+  String? _subtitleNote(int i) {
+    final e = _embedded[i];
+    if (e == null) return 'Looking for subtitles built into the video…';
+    if (!e.available) {
+      return 'Built-in subtitles need FFmpeg on the PC '
+          '(winget install Gyan.FFmpeg).';
+    }
+    return null;
+  }
+
+  Future<ClosedCaptionFile> _captions(int i, String id) async {
+    if (id.startsWith('track:')) {
+      final track = int.parse(id.substring(6));
+      return WebVTTCaptionFile(
+        await widget.client.subtitleVtt(_pathOf(i), track),
+      );
+    }
+    final file = id.substring(5);
+    final text = await widget.client.readText(_inFolder(file));
+    return file.toLowerCase().endsWith('.vtt')
+        ? WebVTTCaptionFile(text)
+        : SubRipCaptionFile(text);
+  }
+
+  /// Shows subtitle [id] (or none) on video [i].
+  Future<void> _applySubtitle(int i, String? id) async {
+    _subtitle[i] = id;
+    final c = _players[i];
+    if (c == null) return;
+    if (id == null) {
+      await c.setClosedCaptionFile(null);
+      if (mounted) setState(() {});
+      return;
+    }
+    _subLoading.add(i);
+    if (mounted) setState(() {});
+    try {
+      await c.setClosedCaptionFile(_captions(i, id));
+    } on Object {
+      if (_subtitle[i] == id) _subtitle[i] = null;
+      await c.setClosedCaptionFile(null);
+      if (mounted && i == _index) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Couldn't load those subtitles.")),
+        );
+      }
+    } finally {
+      _subLoading.remove(i);
+      if (mounted) setState(() {});
+    }
+  }
+
+  /// Turns subtitles on with [id], or off with null, for the current video.
+  /// Remembers on/off for the next videos.
+  Future<void> _chooseSubtitle(String? id) async {
+    await widget.settings.setSubtitlesOn(id != null);
+    await _applySubtitle(_index, id);
+  }
+
+  /// Asks the PC for the video's built-in tracks; if subtitles are on and
+  /// there's no subtitle file, picks one (phone's language first).
+  Future<void> _loadEmbedded(int i) async {
+    try {
+      final result = await widget.client.subtitleTracks(_pathOf(i));
+      _embedded[i] = result;
+    } on Object {
+      _embedded[i] = (available: true, tracks: const []);
+    }
+    if (!mounted) return;
+    setState(() {});
+    if (widget.settings.subtitlesOn &&
+        _subtitle[i] == null &&
+        _tracks(i).isEmpty) {
+      final pick = defaultEmbeddedTrack(
+        _embedded[i]!.tracks,
+        ui.PlatformDispatcher.instance.locale.languageCode,
+      );
+      if (pick != null) await _applySubtitle(i, 'track:${pick.index}');
+    }
+  }
+
   String _pathOf(int i) => widget.folder.isEmpty
       ? widget.videos[i].name
       : '${widget.folder}/${widget.videos[i].name}';
@@ -56,6 +339,10 @@ class _VideoPageState extends State<VideoPage> {
   @override
   void initState() {
     super.initState();
+    // Like the photo viewer: no clock/battery bar while watching.
+    unawaited(
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky),
+    );
     // Current video first, then the neighbours.
     unawaited(_prepare(_index).then((_) => _prepareNeighbours()));
   }
@@ -77,6 +364,13 @@ class _VideoPageState extends State<VideoPage> {
       if (!mounted || _players[i] != c) return;
       await c.setVolume(widget.settings.videoMuted ? 0 : 1);
       await c.setLooping(widget.settings.videoLoop);
+      // Subtitles: a file next to the video first; built-in tracks are
+      // looked up in the background (playback doesn't wait for them).
+      final files = _tracks(i);
+      if (widget.settings.subtitlesOn && files.isNotEmpty) {
+        unawaited(_applySubtitle(i, 'file:${files.first}'));
+      }
+      unawaited(_loadEmbedded(i));
       _ready.add(i);
       if (i == _index) await c.play();
       if (mounted) setState(() {});
@@ -135,7 +429,8 @@ class _VideoPageState extends State<VideoPage> {
         DeviceOrientation.landscapeRight,
       ]);
     } else {
-      await _restoreSystemUi();
+      // Back to portrait; the status bar stays hidden while watching.
+      await SystemChrome.setPreferredOrientations([]);
     }
   }
 
@@ -146,7 +441,7 @@ class _VideoPageState extends State<VideoPage> {
 
   @override
   void dispose() {
-    if (_fullscreen) unawaited(_restoreSystemUi());
+    unawaited(_restoreSystemUi());
     for (final c in _players.values) {
       unawaited(c.dispose());
     }
@@ -192,6 +487,11 @@ class _VideoPageState extends State<VideoPage> {
                       settings: widget.settings,
                       title: _entry.name,
                       onSwipe: _swipe,
+                      subtitleOptions: _options(_index),
+                      subtitleId: _subtitle[_index],
+                      subtitleNote: _subtitleNote(_index),
+                      subtitleLoading: _subLoading.contains(_index),
+                      onChooseSubtitle: _chooseSubtitle,
                       fullscreen: _fullscreen,
                       onFullscreen: () => _setFullscreen(!_fullscreen),
                     )
@@ -230,6 +530,11 @@ class _Player extends StatefulWidget {
     required this.settings,
     required this.title,
     required this.onSwipe,
+    required this.subtitleOptions,
+    required this.subtitleId,
+    required this.subtitleNote,
+    required this.subtitleLoading,
+    required this.onChooseSubtitle,
     required this.fullscreen,
     required this.onFullscreen,
   });
@@ -240,6 +545,14 @@ class _Player extends StatefulWidget {
 
   /// +1 = next video, -1 = previous (from a quick horizontal swipe).
   final ValueChanged<int> onSwipe;
+
+  /// Subtitle files for this video, the one shown (null = off), and how to
+  /// switch.
+  final List<SubOption> subtitleOptions;
+  final String? subtitleId;
+  final String? subtitleNote;
+  final bool subtitleLoading;
+  final Future<void> Function(String?) onChooseSubtitle;
   final bool fullscreen;
   final VoidCallback onFullscreen;
 
@@ -432,6 +745,97 @@ class _PlayerState extends State<_Player> with SingleTickerProviderStateMixin {
               ],
             ),
             const Divider(),
+            // Subtitles (collapsed, like speed).
+            if (widget.subtitleOptions.isEmpty)
+              ListTile(
+                enabled: false,
+                leading: const Icon(Icons.subtitles_off_outlined),
+                title: const Text('Subtitles: none found'),
+                subtitle: Text(
+                  widget.subtitleNote ??
+                      'No built-in subtitles, and no subtitle file next to '
+                          'the video (e.g. Movie.srt for Movie.mp4).',
+                ),
+              )
+            else
+              ExpansionTile(
+                leading: const Icon(Icons.subtitles_outlined),
+                title: const Text('Subtitles'),
+                subtitle: Text(
+                  widget.subtitleLoading
+                      ? 'Loading…'
+                      : widget.subtitleOptions
+                                .where((o) => o.id == widget.subtitleId)
+                                .firstOrNull
+                                ?.label ??
+                            'Off',
+                ),
+                shape: const Border(),
+                collapsedShape: const Border(),
+                children: [
+                  for (final o in <SubOption?>[null, ...widget.subtitleOptions])
+                    ListTile(
+                      enabled: o?.enabled ?? true,
+                      contentPadding: const EdgeInsets.only(
+                        left: 56,
+                        right: 16,
+                      ),
+                      leading: Icon(
+                        o?.id == widget.subtitleId
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_unchecked,
+                      ),
+                      title: Text(o?.label ?? 'Off'),
+                      subtitle: o?.detail == null ? null : Text(o!.detail!),
+                      onTap: () {
+                        Navigator.pop(context);
+                        unawaited(widget.onChooseSubtitle(o?.id));
+                      },
+                    ),
+                  if (widget.subtitleNote != null)
+                    ListTile(
+                      enabled: false,
+                      contentPadding: const EdgeInsets.only(
+                        left: 56,
+                        right: 16,
+                      ),
+                      title: Text(widget.subtitleNote!),
+                    ),
+                ],
+              ),
+            ExpansionTile(
+              leading: const Icon(Icons.format_size),
+              title: const Text('Subtitle size'),
+              subtitle: Text(
+                AppSettings.subtitleSizes.entries
+                    .firstWhere(
+                      (e) => e.value == widget.settings.subtitleSize,
+                      orElse: () => const MapEntry('Medium', 20),
+                    )
+                    .key,
+              ),
+              shape: const Border(),
+              collapsedShape: const Border(),
+              children: [
+                for (final MapEntry(key: label, value: size)
+                    in AppSettings.subtitleSizes.entries)
+                  ListTile(
+                    contentPadding: const EdgeInsets.only(left: 56, right: 16),
+                    leading: Icon(
+                      size == widget.settings.subtitleSize
+                          ? Icons.radio_button_checked
+                          : Icons.radio_button_unchecked,
+                    ),
+                    title: Text(label, style: TextStyle(fontSize: size * 0.8)),
+                    onTap: () {
+                      Navigator.pop(context);
+                      unawaited(widget.settings.setSubtitleSize(size));
+                      setState(() {});
+                    },
+                  ),
+              ],
+            ),
+            const Divider(),
             const ListTile(
               enabled: false,
               leading: Icon(Icons.high_quality_outlined),
@@ -487,6 +891,45 @@ class _PlayerState extends State<_Player> with SingleTickerProviderStateMixin {
           ),
           if (value.isBuffering && !scrubbing)
             const Center(child: CircularProgressIndicator(color: Colors.white)),
+          // Subtitles sit above the control bar when it's showing.
+          if (widget.subtitleLoading)
+            AnimatedPositioned(
+              duration: const Duration(milliseconds: 150),
+              left: 16,
+              right: 16,
+              bottom: _controlsVisible ? 96 : 28,
+              child: const IgnorePointer(
+                child: Text(
+                  'Loading subtitles…',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white70, fontSize: 13),
+                ),
+              ),
+            )
+          else if (widget.subtitleId != null &&
+              plainCaption(value.caption.text).isNotEmpty)
+            AnimatedPositioned(
+              duration: const Duration(milliseconds: 150),
+              left: 16,
+              right: 16,
+              bottom: _controlsVisible ? 96 : 28,
+              child: IgnorePointer(
+                child: Text(
+                  plainCaption(value.caption.text),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: widget.settings.subtitleSize,
+                    height: 1.25,
+                    shadows: const [
+                      Shadow(blurRadius: 3),
+                      Shadow(offset: Offset(1, 1), blurRadius: 2),
+                      Shadow(offset: Offset(-1, -1), blurRadius: 2),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           AnimatedOpacity(
             opacity: _controlsVisible ? 1 : 0,
             duration: const Duration(milliseconds: 150),

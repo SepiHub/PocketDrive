@@ -28,8 +28,9 @@ void main() {
         res.add(data);
       } else {
         final start = int.parse(m.group(1)!);
-        final end =
-            m.group(2)!.isEmpty ? data.length - 1 : int.parse(m.group(2)!);
+        final end = m.group(2)!.isEmpty
+            ? data.length - 1
+            : int.parse(m.group(2)!);
         res
           ..statusCode = 206
           ..headers.set('content-range', 'bytes $start-$end/${data.length}')
@@ -39,8 +40,10 @@ void main() {
       await res.close();
     });
     relay = VideoRelay((path, range, method) async {
-      final req = await upstreamClient.openUrl(method,
-          Uri.parse('http://127.0.0.1:${fakePc.port}/api/file?path=$path'));
+      final req = await upstreamClient.openUrl(
+        method,
+        Uri.parse('http://127.0.0.1:${fakePc.port}/api/file?path=$path'),
+      );
       if (range != null) req.headers.set('range', range);
       return req.close();
     });
@@ -53,8 +56,10 @@ void main() {
     client.close(force: true);
   });
 
-  Future<(int, Map<String, String>, List<int>)> get(Uri url,
-      {String? range}) async {
+  Future<(int, Map<String, String>, List<int>)> get(
+    Uri url, {
+    String? range,
+  }) async {
     final req = await client.getUrl(url);
     if (range != null) req.headers.set('range', range);
     final res = await req.close();
@@ -80,8 +85,9 @@ void main() {
 
   test('passes seeks (ranges) through', () async {
     final (status, headers, body) = await get(
-        await relay.urlFor('folder/v.mp4'),
-        range: 'bytes=500000-500099');
+      await relay.urlFor('folder/v.mp4'),
+      range: 'bytes=500000-500099',
+    );
     expect(status, 206);
     expect(body, data.sublist(500000, 500100));
     expect(headers['content-range'], 'bytes 500000-500099/${data.length}');
@@ -106,8 +112,7 @@ void main() {
     expect(requestedPaths.length, before, reason: 'nothing reached the PC');
   });
 
-  test('a player that hangs up mid-stream does not break the relay',
-      () async {
+  test('a player that hangs up mid-stream does not break the relay', () async {
     final url = await relay.urlFor('v.mp4');
     final req = await client.getUrl(url);
     final res = await req.close();

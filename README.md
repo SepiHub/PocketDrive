@@ -13,9 +13,10 @@ Use a folder on your Windows PC as extra storage for your Android phone, over yo
 **Phone app (Android, Flutter)**
 - Pair once by scanning the QR code; finds the PC by itself afterwards ("Find my PC" in the menu).
 - Browse folders (with file counts), sort by name, date or size, preview grid, full-screen photo viewer with pinch and double-tap zoom, animated GIFs.
-- Video player with seeking, swipe between videos, zoom, mute, loop and speed.
+- Video player with seeking, swipe between videos, zoom, mute, loop, speed and subtitles (built into the video, via FFmpeg on the PC, or `.srt`/`.vtt` files next to it), full screen without the status bar.
 - Slideshow of a folder (shuffle, configurable photo time, videos play to the end).
 - Upload from the gallery or the Files app (no limit), Gallery-style multi-select to move or delete.
+- Hide folders from the app (they stay normal on the PC); show them again from the sort menu.
 
 See [docs/PLAN.md](docs/PLAN.md) for the design and how it was built in stages.
 
@@ -38,7 +39,7 @@ docs/       Design notes
 
 ## Building
 
-Requires Flutter (stable) with Windows desktop and Android toolchains.
+Requires Flutter (stable) with Windows desktop and Android toolchains. Optional on the PC: [FFmpeg](https://ffmpeg.org) for built-in subtitle tracks (`winget install Gyan.FFmpeg`).
 
 ```powershell
 cd pc_app;    flutter run -d windows

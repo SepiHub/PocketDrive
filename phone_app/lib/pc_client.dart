@@ -30,6 +30,33 @@ class PcError implements Exception {
 
 const _timeout = Duration(seconds: 5);
 
+/// A subtitle track inside a video file.
+class EmbeddedTrack {
+  const EmbeddedTrack({
+    required this.index,
+    required this.codec,
+    required this.isText,
+    this.language,
+    this.title,
+  });
+
+  factory EmbeddedTrack.fromJson(Map<String, Object?> j) => EmbeddedTrack(
+    index: (j['index'] as num).toInt(),
+    codec: j['codec'] as String? ?? '',
+    isText: j['text'] == true,
+    language: j['language'] as String?,
+    title: j['title'] as String?,
+  );
+
+  final int index;
+  final String codec;
+
+  /// False for picture-based subtitles (Blu-ray/DVD), which can't be shown.
+  final bool isText;
+  final String? language;
+  final String? title;
+}
+
 /// The user cancelled an upload.
 class UploadCancelled implements Exception {
   const UploadCancelled();
@@ -307,6 +334,58 @@ class PcClient {
         (f as Map)['path'] as String: f['error'] as String,
     };
     return ((res['deleted'] as List).length, failed);
+  }
+
+  /// Reads a (small) text file from the PC, e.g. a subtitle file.
+  Future<String> readText(String path) async {
+    final res = await openFile(path);
+    final bytes = await res
+        .fold<BytesBuilder>(BytesBuilder(copy: false), (b, d) => b..add(d))
+        .timeout(const Duration(seconds: 30));
+    if (res.statusCode == 401) throw const NotPaired();
+    if (res.statusCode != 200) throw PcError(res.statusCode, 'read');
+    var text = utf8.decode(bytes.takeBytes(), allowMalformed: true);
+    if (text.startsWith('\uFEFF')) text = text.substring(1); // BOM
+    return text.replaceAll('\r\n', '\n');
+  }
+
+  /// Subtitle tracks built into a video (read by FFmpeg on the PC).
+  /// `available` is false when the PC doesn't have FFmpeg.
+  Future<({bool available, List<EmbeddedTrack> tracks})> subtitleTracks(
+    String path,
+  ) async {
+    final h = await connect();
+    final res = await _send(
+      _http,
+      'GET',
+      _uri(h, Api.subtitles, {'path': path}),
+      token: pairing.token,
+      timeout: const Duration(seconds: 40),
+    );
+    return (
+      available: res['available'] == true,
+      tracks: [
+        for (final t in res['tracks'] as List)
+          EmbeddedTrack.fromJson((t as Map).cast<String, Object?>()),
+      ],
+    );
+  }
+
+  /// One built-in track as WebVTT. The PC converts it the first time, which
+  /// takes a while for big files (it reads through the whole video).
+  Future<String> subtitleVtt(String path, int track) async {
+    final h = await connect();
+    final req = await _streamHttp
+        .getUrl(_uri(h, Api.subtitle, {'path': path, 'track': '$track'}))
+        .timeout(_timeout);
+    req.headers.set(Api.authHeader, Api.bearer(pairing.token));
+    final res = await req.close().timeout(const Duration(minutes: 4));
+    final text = await utf8
+        .decodeStream(res)
+        .timeout(const Duration(minutes: 1));
+    if (res.statusCode == 401) throw const NotPaired();
+    if (res.statusCode != 200) throw PcError(res.statusCode, 'subtitle');
+    return text;
   }
 
   /// Hides (or shows again) a folder in the app. Nothing changes in Windows.

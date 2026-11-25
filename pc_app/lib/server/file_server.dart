@@ -16,6 +16,7 @@ import 'hidden_folders.dart';
 import 'move.dart';
 import 'path_jail.dart';
 import 'recycle.dart';
+import 'subtitles.dart';
 import 'thumbnails.dart';
 import 'uploads.dart';
 
@@ -29,9 +30,11 @@ class ServerContext {
     required this.thumbs,
     this.recycler = recycleToBin,
     HiddenFolders? hidden,
+    SubtitleService? subtitles,
     this.onPaired,
     void Function(String)? log,
   }) : hidden = hidden ?? HiddenFolders.memory(),
+       subtitles = subtitles ?? SubtitleService(defaultSubtitleCache()),
        log = log ?? ((_) {});
 
   final PathJail jail;
@@ -40,6 +43,7 @@ class ServerContext {
   final ThumbnailService thumbs;
   final Recycler recycler;
   final HiddenFolders hidden;
+  final SubtitleService subtitles;
 
   /// The currently open pairing window, if any.
   final PairingWindow? Function() pairingWindow;
@@ -64,6 +68,8 @@ Handler buildHandler(ServerContext c) {
     )
     ..get(Api.list, (Request r) => _list(c, r))
     ..post(Api.hide, (Request r) => _hide(c, r))
+    ..get(Api.subtitles, (Request r) => _subtitleTracks(c, r))
+    ..get(Api.subtitle, (Request r) => _subtitle(c, r))
     ..get(Api.file, (Request r) => _file(c.jail, r))
     ..get(Api.thumb, (Request r) => _thumb(c, r))
     ..post(Api.upload, (Request r) => _upload(c, r))
@@ -216,6 +222,41 @@ Future<Response> _list(ServerContext c, Request r) async {
     );
   }
   return _json(200, Listing(path: rel, entries: entries).toJson());
+}
+
+/// Lists the subtitle tracks built into a video.
+Future<Response> _subtitleTracks(ServerContext c, Request r) async {
+  final real = await c.jail.resolveExisting(_pathParam(r));
+  if (!await FileSystemEntity.isFile(real)) {
+    return _error(400, ApiError.notAFile);
+  }
+  final available = await c.subtitles.available();
+  final tracks = available ? await c.subtitles.tracks(real) : const [];
+  return _json(200, {
+    'available': available,
+    'tracks': [for (final t in tracks) t.toJson()],
+  });
+}
+
+/// One built-in subtitle track, converted to WebVTT.
+Future<Response> _subtitle(ServerContext c, Request r) async {
+  final real = await c.jail.resolveExisting(_pathParam(r));
+  if (!await FileSystemEntity.isFile(real)) {
+    return _error(400, ApiError.notAFile);
+  }
+  final track = int.tryParse(r.url.queryParameters['track'] ?? '');
+  if (track == null || track < 0 || track > 999) {
+    return _error(400, ApiError.badRequest);
+  }
+  final vtt = await c.subtitles.webVtt(real, track);
+  if (vtt == null) return _error(404, ApiError.noSubtitle);
+  return Response.ok(
+    vtt.openRead(),
+    headers: {
+      'content-type': 'text/vtt; charset=utf-8',
+      'content-length': '${await vtt.length()}',
+    },
+  );
 }
 
 /// Hides or shows a folder in the phone app. Same checks as everywhere:
@@ -395,6 +436,7 @@ class PocketServer {
     required ThumbnailService thumbs,
     Recycler recycler = recycleToBin,
     HiddenFolders? hidden,
+    SubtitleService? subtitles,
     void Function(PairedDevice)? onPaired,
     InternetAddress? address,
     int port = Api.defaultPort,
@@ -411,6 +453,7 @@ class PocketServer {
         thumbs: thumbs,
         recycler: recycler,
         hidden: hidden,
+        subtitles: subtitles,
         onPaired: onPaired,
         log: log,
       ),

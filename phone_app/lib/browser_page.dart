@@ -599,6 +599,11 @@ class _BrowserPageState extends State<BrowserPage> {
               ];
               return VideoPage(
                 settings: widget.session.settings,
+                client: _client,
+                subtitleFiles: [
+                  for (final f in files)
+                    if (isSubtitleFile(f.name)) f.name,
+                ],
                 relay: widget.session.relay,
                 thumbs: _thumbs,
                 folder: widget.path,

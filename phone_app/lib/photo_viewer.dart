@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:pocketdrive_shared/pocketdrive_shared.dart';
 
@@ -38,7 +41,17 @@ class _PhotoViewerState extends State<PhotoViewer> {
   bool _swiping = false;
 
   @override
+  void initState() {
+    super.initState();
+    // Full screen: no clock/battery bar while looking at photos.
+    unawaited(
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky),
+    );
+  }
+
+  @override
   void dispose() {
+    unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
     _pages.dispose();
     super.dispose();
   }

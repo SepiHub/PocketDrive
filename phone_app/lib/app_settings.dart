@@ -10,6 +10,14 @@ class AppSettings extends ChangeNotifier {
   static const _mutedKey = 'video_muted';
   static const _loopKey = 'video_loop';
   static const _shuffleKey = 'slideshow_shuffle';
+  static const _subSizeKey = 'subtitle_size';
+  static const _subsOnKey = 'subtitles_on';
+  static const subtitleSizes = {
+    'Small': 16.0,
+    'Medium': 20.0,
+    'Large': 26.0,
+    'Extra large': 32.0,
+  };
   static const _sortByKey = 'sort_by';
   static const _sortDescKey = 'sort_desc';
   static const defaultSlideSeconds = 5;
@@ -37,6 +45,22 @@ class AppSettings extends ChangeNotifier {
 
   Future<void> setVideoMuted(bool muted) async {
     await _prefs.setBool(_mutedKey, muted);
+    notifyListeners();
+  }
+
+  /// Subtitle font size; remembered.
+  double get subtitleSize => _prefs.getDouble(_subSizeKey) ?? 20;
+
+  Future<void> setSubtitleSize(double size) async {
+    await _prefs.setDouble(_subSizeKey, size);
+    notifyListeners();
+  }
+
+  /// Show subtitles automatically when a video has a subtitle file.
+  bool get subtitlesOn => _prefs.getBool(_subsOnKey) ?? true;
+
+  Future<void> setSubtitlesOn(bool on) async {
+    await _prefs.setBool(_subsOnKey, on);
     notifyListeners();
   }
 
