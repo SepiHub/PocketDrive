@@ -677,6 +677,7 @@ class _PlayerState extends State<_Player> with SingleTickerProviderStateMixin {
     _resumeNoteTimer.cancel();
     _v.removeListener(_onVideo);
     _hideTimer?.cancel();
+    _skipBadgeTimer?.cancel();
     _zoomAnim.dispose();
     _zoom.dispose();
     super.dispose();
@@ -715,9 +716,18 @@ class _PlayerState extends State<_Player> with SingleTickerProviderStateMixin {
 
   /// Taps are handled by hand so a single tap reacts at once (no waiting to
   /// see if a second one follows). A quick second tap near the first undoes
-  /// the first tap's show/hide and toggles zoom instead.
+  /// the first tap's show/hide and instead: on the left or right third,
+  /// skips 15 s back or forward (keep tapping to skip more); in the middle,
+  /// toggles zoom.
   void _onTapUp(TapUpDetails d) {
     final now = DateTime.now();
+    final width = context.size?.width ?? 0;
+    final x = d.localPosition.dx;
+    final side = x < width / 3 ? -1 : (x > width * 2 / 3 ? 1 : 0);
+    if (side != 0 && side == _skipSide && now.isBefore(_skipStreakEnd)) {
+      _sideSkip(side, now); // already skipping: every tap counts
+      return;
+    }
     final isDouble =
         _lastTap != null &&
         now.difference(_lastTap!) < const Duration(milliseconds: 300) &&
@@ -725,7 +735,44 @@ class _PlayerState extends State<_Player> with SingleTickerProviderStateMixin {
     _lastTap = isDouble ? null : now;
     _lastTapAt = d.localPosition;
     _toggleControls();
-    if (isDouble) _toggleZoom(d.localPosition);
+    if (!isDouble) return;
+    if (side == 0) {
+      _toggleZoom(d.localPosition);
+    } else {
+      _sideSkip(side, now);
+    }
+  }
+
+  static const _sideSkipSeconds = 15;
+
+  /// Side of the current double-tap skip streak (-1 back, 1 forward, 0 none),
+  /// how far it has skipped so far, and where it's heading (so rapid taps
+  /// add up even before the player has caught up).
+  int _skipSide = 0;
+  int _skipTotal = 0;
+  Duration _skipTarget = Duration.zero;
+  DateTime _skipStreakEnd = DateTime(0);
+  Timer? _skipBadgeTimer;
+
+  void _sideSkip(int side, DateTime now) {
+    final v = _v.value;
+    final continuing = side == _skipSide && now.isBefore(_skipStreakEnd);
+    final from = continuing ? _skipTarget : v.position;
+    var to = from + Duration(seconds: _sideSkipSeconds * side);
+    if (to < Duration.zero) to = Duration.zero;
+    if (to > v.duration) to = v.duration;
+    unawaited(_v.seekTo(to));
+    _skipBadgeTimer?.cancel();
+    setState(() {
+      _skipSide = side;
+      _skipTotal = (continuing ? _skipTotal : 0) + _sideSkipSeconds;
+      _skipTarget = to;
+      _skipStreakEnd = now.add(const Duration(milliseconds: 700));
+    });
+    _lastTap = null;
+    _skipBadgeTimer = Timer(const Duration(milliseconds: 800), () {
+      if (mounted) setState(() => _skipSide = 0);
+    });
   }
 
   void _toggleZoom(Offset at) {
@@ -986,6 +1033,36 @@ class _PlayerState extends State<_Player> with SingleTickerProviderStateMixin {
           ),
           if (value.isBuffering && !scrubbing)
             const Center(child: CircularProgressIndicator(color: Colors.white)),
+          if (_skipSide != 0)
+            Align(
+              alignment: Alignment(_skipSide * 0.7, 0),
+              child: IgnorePointer(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(32),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _skipSide < 0 ? Icons.fast_rewind : Icons.fast_forward,
+                        color: Colors.white,
+                        size: 32,
+                      ),
+                      Text(
+                        '${_skipSide < 0 ? '-' : '+'}$_skipTotal s',
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           if (widget.resumedAt != null &&
               _resumeNote &&
               _resumeNoteTimer.isActive)
