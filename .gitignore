@@ -1,0 +1,15 @@
+# Editors / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Never commit runtime secrets or local test data
+*.pem
+*.key
+*.p12
+*.jks
+key.properties
+local.properties
+test_share/
