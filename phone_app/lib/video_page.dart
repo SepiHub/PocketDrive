@@ -9,6 +9,7 @@ import 'package:video_player/video_player.dart';
 
 import 'app_settings.dart';
 import 'pc_client.dart';
+import 'resume_store.dart';
 import 'thumbnails.dart';
 import 'video_relay.dart';
 
@@ -344,7 +345,55 @@ class _VideoPageState extends State<VideoPage> {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky),
     );
     // Current video first, then the neighbours.
-    unawaited(_prepare(_index).then((_) => _prepareNeighbours()));
+    unawaited(() async {
+      _resume = await ResumeStore.load();
+      await _prepare(_index);
+      _prepareNeighbours();
+    }());
+    // Remember how far we got, every few seconds while playing.
+    _saveTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (_players[_index]?.value.isPlaying ?? false) _saveProgress(_index);
+    });
+  }
+
+  ResumeStore? _resume;
+  Timer? _saveTimer;
+
+  /// Where each video was resumed from (shown as "Resumed at ...").
+  final _resumedAt = <int, Duration>{};
+
+  String _resumeId(int i) => ResumeStore.idFor(
+    widget.client.pairing.pcId,
+    _pathOf(i),
+    widget.videos[i].modified,
+  );
+
+  void _saveProgress(int i) {
+    final c = _players[i];
+    if (c == null || !_ready.contains(i)) return;
+    unawaited(_resume?.save(_resumeId(i), c.value.position, c.value.duration));
+  }
+
+  /// Positions video [i] where you left off (or at the start).
+  Future<void> _seekToStart(int i, VideoPlayerController c) async {
+    final saved = _resume?.positionFor(_resumeId(i));
+    if (saved != null && saved < c.value.duration) {
+      await c.seekTo(saved);
+      _resumedAt[i] = saved;
+    } else {
+      await c.seekTo(Duration.zero);
+      _resumedAt.remove(i);
+    }
+    if (mounted) setState(() {});
+  }
+
+  /// "Start over": back to 0 and forget the saved position.
+  Future<void> _startOver() async {
+    final i = _index;
+    _resumedAt.remove(i);
+    unawaited(_resume?.clear(_resumeId(i)));
+    await _players[i]?.seekTo(Duration.zero);
+    if (mounted) setState(() {});
   }
 
   void _prepareNeighbours() {
@@ -372,7 +421,10 @@ class _VideoPageState extends State<VideoPage> {
       }
       unawaited(_loadEmbedded(i));
       _ready.add(i);
-      if (i == _index) await c.play();
+      if (i == _index) {
+        await _seekToStart(i, c);
+        await c.play();
+      }
       if (mounted) setState(() {});
     } on Object catch (e) {
       _errors[i] =
@@ -386,6 +438,7 @@ class _VideoPageState extends State<VideoPage> {
   void _swipe(int delta) {
     final next = _index + delta;
     if (next < 0 || next >= widget.videos.length) return;
+    _saveProgress(_index);
     unawaited(_players[_index]?.pause());
     setState(() {
       _direction = delta;
@@ -396,7 +449,7 @@ class _VideoPageState extends State<VideoPage> {
       // Settings may have changed since it was loaded.
       unawaited(c.setVolume(widget.settings.videoMuted ? 0 : 1));
       unawaited(c.setLooping(widget.settings.videoLoop));
-      unawaited(c.seekTo(Duration.zero).then((_) => c.play()));
+      unawaited(_seekToStart(next, c).then((_) => c.play()));
     } else {
       unawaited(_prepare(next)); // plays once loaded
     }
@@ -453,6 +506,8 @@ class _VideoPageState extends State<VideoPage> {
 
   @override
   void dispose() {
+    _saveTimer?.cancel();
+    _saveProgress(_index);
     unawaited(_restoreSystemUi());
     for (final c in _players.values) {
       unawaited(c.dispose());
@@ -507,6 +562,8 @@ class _VideoPageState extends State<VideoPage> {
                       fullscreen: _fullscreen,
                       onFullscreen: () => _setFullscreen(!_fullscreen),
                       onFlip: _flipLandscape,
+                      resumedAt: _resumedAt[_index],
+                      onStartOver: _startOver,
                     )
                   : const Center(child: CircularProgressIndicator()),
             ),
@@ -551,6 +608,8 @@ class _Player extends StatefulWidget {
     required this.fullscreen,
     required this.onFullscreen,
     required this.onFlip,
+    required this.resumedAt,
+    required this.onStartOver,
   });
 
   final VideoPlayerController video;
@@ -573,6 +632,10 @@ class _Player extends StatefulWidget {
   /// Full screen only: turn to the other landscape side.
   final VoidCallback onFlip;
 
+  /// Set when the video continued where you left off.
+  final Duration? resumedAt;
+  final VoidCallback onStartOver;
+
   @override
   State<_Player> createState() => _PlayerState();
 }
@@ -580,6 +643,12 @@ class _Player extends StatefulWidget {
 class _PlayerState extends State<_Player> with SingleTickerProviderStateMixin {
   /// Hidden until the user taps (also after swiping to another video).
   bool _controlsVisible = false;
+
+  /// The "Resumed at ... · Start over" note shows for a few seconds.
+  bool _resumeNote = true;
+  late final Timer _resumeNoteTimer = Timer(const Duration(seconds: 7), () {
+    if (mounted) setState(() => _resumeNote = false);
+  });
   Timer? _hideTimer;
 
   /// While the seek bar is dragged: where the thumb is (in ms).
@@ -603,6 +672,7 @@ class _PlayerState extends State<_Player> with SingleTickerProviderStateMixin {
 
   @override
   void dispose() {
+    _resumeNoteTimer.cancel();
     _v.removeListener(_onVideo);
     _hideTimer?.cancel();
     _zoomAnim.dispose();
@@ -908,6 +978,40 @@ class _PlayerState extends State<_Player> with SingleTickerProviderStateMixin {
           ),
           if (value.isBuffering && !scrubbing)
             const Center(child: CircularProgressIndicator(color: Colors.white)),
+          if (widget.resumedAt != null &&
+              _resumeNote &&
+              _resumeNoteTimer.isActive)
+            Positioned(
+              top: MediaQuery.paddingOf(context).top + 64,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Material(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(24),
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 16, right: 4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Resumed at '
+                          '${_fmt(widget.resumedAt!.inMilliseconds.toDouble())}',
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                        TextButton(
+                          onPressed: () {
+                            setState(() => _resumeNote = false);
+                            widget.onStartOver();
+                          },
+                          child: const Text('Start over'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
           // Subtitles sit above the control bar when it's showing.
           if (widget.subtitleLoading)
             AnimatedPositioned(
