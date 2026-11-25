@@ -6,6 +6,8 @@ import 'package:pocketdrive_shared/pocketdrive_shared.dart';
 import 'pc_client.dart';
 import 'photo_viewer.dart';
 import 'thumbnails.dart';
+import 'video_page.dart';
+import 'video_relay.dart';
 
 String joinPath(String folder, String name) =>
     folder.isEmpty ? name : '$folder/$name';
@@ -16,6 +18,7 @@ class BrowserPage extends StatefulWidget {
     super.key,
     required this.client,
     required this.thumbs,
+    required this.relay,
     required this.path,
     this.onNotPaired,
     this.menu,
@@ -23,6 +26,7 @@ class BrowserPage extends StatefulWidget {
 
   final PcClient client;
   final ThumbnailCache thumbs;
+  final VideoRelay relay;
 
   /// Folder relative to the shared folder; '' is the top.
   final String path;
@@ -83,6 +87,7 @@ class _BrowserPageState extends State<BrowserPage> {
         builder: (_) => BrowserPage(
           client: widget.client,
           thumbs: widget.thumbs,
+          relay: widget.relay,
           path: path,
           onNotPaired: widget.onNotPaired,
         ),
@@ -101,10 +106,19 @@ class _BrowserPageState extends State<BrowserPage> {
       )));
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(e.kind == MediaKind.video
-          ? 'Video playback is coming in the next update.'
-          : "Can't open this kind of file yet."),
+    if (e.kind == MediaKind.video) {
+      unawaited(Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => VideoPage(
+          relay: widget.relay,
+          preview: PcImage(widget.thumbs, path, e, 256),
+          path: path,
+          entry: e,
+        ),
+      )));
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text("Can't open this kind of file yet."),
     ));
   }
 

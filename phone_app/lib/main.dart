@@ -9,6 +9,7 @@ import 'pairing_store.dart';
 import 'pc_client.dart';
 import 'scan_page.dart';
 import 'thumbnails.dart';
+import 'video_relay.dart';
 
 void main() {
   runApp(const PocketDriveApp());
@@ -187,9 +188,13 @@ class _PcPageState extends State<PcPage> {
   late final PcClient _client =
       PcClient(widget.pairing, onHostChanged: widget.onHostChanged);
   late final ThumbnailCache _thumbs = ThumbnailCache(_client);
+  late final VideoRelay _relay = VideoRelay(
+      (path, range, method) =>
+          _client.openFile(path, range: range, method: method));
 
   @override
   void dispose() {
+    unawaited(_relay.close());
     _client.close();
     super.dispose();
   }
@@ -218,6 +223,7 @@ class _PcPageState extends State<PcPage> {
     return BrowserPage(
       client: _client,
       thumbs: _thumbs,
+      relay: _relay,
       path: '',
       onNotPaired: () {
         Navigator.of(context).popUntil((r) => r.isFirst);

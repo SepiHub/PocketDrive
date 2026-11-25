@@ -42,7 +42,12 @@ class PcClient {
 
   String? get host => _host;
 
-  void close() => _http.close(force: true);
+  late final HttpClient _streamHttp = pinnedHttpClient(pairing.fingerprint);
+
+  void close() {
+    _http.close(force: true);
+    _streamHttp.close(force: true);
+  }
 
   /// Pairs with the PC from a scanned QR code. Tries each address in turn;
   /// a PC with the wrong certificate is refused before the code is sent.
@@ -134,6 +139,20 @@ class PcClient {
     if (res.statusCode == 404) return null;
     if (res.statusCode != 200) throw PcError(res.statusCode, 'thumb');
     return bytes.takeBytes();
+  }
+
+  /// Starts downloading a file (or part of it, with a `Range` header) and
+  /// returns the response unread, for streaming. Uses its own connection
+  /// pool so videos don't wait behind thumbnail requests.
+  Future<HttpClientResponse> openFile(String path,
+      {String? range, String method = 'GET'}) async {
+    final h = await connect();
+    final req = await _streamHttp
+        .openUrl(method, _uri(h, Api.file, {'path': path}))
+        .timeout(_timeout);
+    req.headers.set(Api.authHeader, Api.bearer(pairing.token));
+    if (range != null) req.headers.set(HttpHeaders.rangeHeader, range);
+    return req.close().timeout(_timeout);
   }
 
   Uri _uri(String host, String path, [Map<String, String>? query]) => Uri(
