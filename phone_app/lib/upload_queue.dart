@@ -4,8 +4,8 @@ import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:wakelock_plus/wakelock_plus.dart';
 
+import 'keep_awake.dart';
 import 'pc_client.dart';
 
 enum UploadState { waiting, sending, done, failed, cancelled }
@@ -66,7 +66,7 @@ class UploadQueue extends ChangeNotifier {
 
   Future<void> _run() async {
     _running = true;
-    await WakelockPlus.enable();
+    KeepAwake.hold(this);
     try {
       while (true) {
         final item = items
@@ -108,7 +108,7 @@ class UploadQueue extends ChangeNotifier {
     } finally {
       _cancel = null;
       _running = false;
-      await WakelockPlus.disable();
+      KeepAwake.release(this);
       notifyListeners();
     }
   }

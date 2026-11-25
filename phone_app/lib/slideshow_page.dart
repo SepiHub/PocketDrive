@@ -5,10 +5,10 @@ import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:pocketdrive_shared/pocketdrive_shared.dart';
 import 'package:video_player/video_player.dart';
-import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'app_settings.dart';
 import 'browser_page.dart';
+import 'keep_awake.dart';
 import 'thumbnails.dart';
 import 'video_page.dart' show slideTransition;
 import 'video_relay.dart';
@@ -106,7 +106,7 @@ class _SlideshowPageState extends State<SlideshowPage> {
   @override
   void initState() {
     super.initState();
-    unawaited(WakelockPlus.enable());
+    KeepAwake.hold(this);
     unawaited(
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky),
     );
@@ -120,7 +120,7 @@ class _SlideshowPageState extends State<SlideshowPage> {
     for (final c in _videos.values) {
       unawaited(c.dispose());
     }
-    unawaited(WakelockPlus.disable());
+    KeepAwake.release(this);
     unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
     super.dispose();
   }

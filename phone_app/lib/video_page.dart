@@ -8,6 +8,7 @@ import 'package:pocketdrive_shared/pocketdrive_shared.dart';
 import 'package:video_player/video_player.dart';
 
 import 'app_settings.dart';
+import 'keep_awake.dart';
 import 'pc_client.dart';
 import 'resume_store.dart';
 import 'thumbnails.dart';
@@ -672,6 +673,7 @@ class _PlayerState extends State<_Player> with SingleTickerProviderStateMixin {
 
   @override
   void dispose() {
+    KeepAwake.release(this);
     _resumeNoteTimer.cancel();
     _v.removeListener(_onVideo);
     _hideTimer?.cancel();
@@ -681,6 +683,12 @@ class _PlayerState extends State<_Player> with SingleTickerProviderStateMixin {
   }
 
   void _onVideo() {
+    // Screen stays on while playing; normal sleep when paused or ended.
+    if (_v.value.isPlaying) {
+      KeepAwake.hold(this);
+    } else {
+      KeepAwake.release(this);
+    }
     if (mounted) setState(() {});
   }
 
