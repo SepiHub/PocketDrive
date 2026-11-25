@@ -9,6 +9,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import 'app_settings.dart';
 import 'browser_page.dart';
 import 'thumbnails.dart';
+import 'video_page.dart' show slideTransition;
 import 'video_relay.dart';
 
 /// Plays every photo, GIF and video of one folder in order, then starts
@@ -82,15 +83,20 @@ class _SlideshowPageState extends State<SlideshowPage> {
     }
   }
 
-  void _go(int delta) {
+  /// +1/-1 when the user swiped or tapped next/previous (slide), 0 for the
+  /// automatic advance (crossfade).
+  int _direction = 0;
+
+  void _go(int delta, {bool manual = true}) {
     setState(() {
+      _direction = manual ? delta : 0;
       _index = (_index + delta) % widget.items.length;
       if (_index < 0) _index += widget.items.length;
     });
     _startSlide();
   }
 
-  void _next() => _go(1);
+  void _next() => _go(1, manual: false);
 
   void _togglePlay() {
     setState(() => _playing = !_playing);
@@ -123,15 +129,29 @@ class _SlideshowPageState extends State<SlideshowPage> {
       body: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: _onTap,
+        // Swipe left/right for the next/previous item.
+        onHorizontalDragEnd: (d) {
+          final vx = d.primaryVelocity ?? 0;
+          if (vx.abs() > 300) _go(vx < 0 ? 1 : -1);
+        },
         child: Stack(
           fit: StackFit.expand,
           children: [
             AnimatedSwitcher(
-              duration: const Duration(milliseconds: 600),
+              duration: Duration(milliseconds: _direction == 0 ? 600 : 320),
+              transitionBuilder: (child, animation) => _direction == 0
+                  ? FadeTransition(opacity: animation, child: child)
+                  : slideTransition(
+                      child,
+                      animation,
+                      currentKey: ValueKey(_index),
+                      direction: _direction,
+                    ),
               child: KeyedSubtree(
                 key: ValueKey(_index),
                 child: e.kind == MediaKind.video
                     ? _SlideVideo(
+                        muted: widget.settings.videoMuted,
                         relay: widget.relay,
                         path: _path(e),
                         preview: PcImage(widget.thumbs, _path(e), e, 256),
@@ -235,6 +255,27 @@ class _SlideshowPageState extends State<SlideshowPage> {
                               },
                               icon: const Icon(Icons.skip_next),
                             ),
+                            const SizedBox(width: 24),
+                            // Same remembered setting as the video player.
+                            IconButton(
+                              color: Colors.white,
+                              iconSize: 28,
+                              tooltip: widget.settings.videoMuted
+                                  ? 'Unmute'
+                                  : 'Mute',
+                              onPressed: () async {
+                                await widget.settings.setVideoMuted(
+                                  !widget.settings.videoMuted,
+                                );
+                                if (mounted) setState(() {});
+                                _showControls();
+                              },
+                              icon: Icon(
+                                widget.settings.videoMuted
+                                    ? Icons.volume_off
+                                    : Icons.volume_up,
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -272,6 +313,7 @@ class _Bar extends StatelessWidget {
 /// A video inside the slideshow: plays once, then calls [onFinished].
 class _SlideVideo extends StatefulWidget {
   const _SlideVideo({
+    required this.muted,
     required this.relay,
     required this.path,
     required this.preview,
@@ -279,6 +321,7 @@ class _SlideVideo extends StatefulWidget {
     required this.onFinished,
   });
 
+  final bool muted;
   final VideoRelay relay;
   final String path;
   final PcImage preview;
@@ -308,6 +351,7 @@ class _SlideVideoState extends State<_SlideVideo> {
       await video.initialize();
       if (!mounted) return;
       video.addListener(_onTick);
+      await video.setVolume(widget.muted ? 0 : 1);
       if (widget.playing) await video.play();
       setState(() {});
     } on Object {
@@ -338,6 +382,9 @@ class _SlideVideoState extends State<_SlideVideo> {
     final v = _video;
     if (v != null && v.value.isInitialized && old.playing != widget.playing) {
       unawaited(widget.playing ? v.play() : v.pause());
+    }
+    if (v != null && v.value.isInitialized && old.muted != widget.muted) {
+      unawaited(v.setVolume(widget.muted ? 0 : 1));
     }
   }
 

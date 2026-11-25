@@ -26,6 +26,11 @@ abstract final class Api {
   /// [RemoteEntry] of the new folder. 409 `exists` if the name is taken.
   static const String mkdir = '/api/mkdir';
 
+  /// `POST ?to=<folder>` with JSON `{"paths": [...]}` -> JSON
+  /// `{"moved": [{"from", "name"}], "failed": [{"path", "error"}]}`.
+  /// Moved items keep their name unless taken (then ` (2)` is added).
+  static const String move = '/api/move';
+
   /// `POST` [PairRequest] -> [PairResponse]. The only endpoint that needs no
   /// device token; works only while the PC shows a pairing QR code.
   static const String pair = '/api/pair';

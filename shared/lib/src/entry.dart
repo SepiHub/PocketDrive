@@ -3,10 +3,28 @@ enum EntryType { dir, file }
 enum MediaKind { image, video, other }
 
 const _imageExtensions = {
-  'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif', 'avif', 'dng',
+  'jpg',
+  'jpeg',
+  'png',
+  'gif',
+  'webp',
+  'bmp',
+  'heic',
+  'heif',
+  'avif',
+  'dng',
 };
 const _videoExtensions = {
-  'mp4', 'm4v', 'mov', 'mkv', 'webm', 'avi', '3gp', 'wmv', 'mts', 'm2ts',
+  'mp4',
+  'm4v',
+  'mov',
+  'mkv',
+  'webm',
+  'avi',
+  '3gp',
+  'wmv',
+  'mts',
+  'm2ts',
 };
 
 /// Guesses the media kind from a file name's extension.
@@ -27,6 +45,7 @@ class RemoteEntry {
     required this.size,
     required this.modified,
     required this.kind,
+    this.fileCount,
   });
 
   final String name;
@@ -37,24 +56,30 @@ class RemoteEntry {
   final DateTime modified;
   final MediaKind kind;
 
+  /// For folders: how many files are directly inside (null if unknown).
+  final int? fileCount;
+
   bool get isDir => type == EntryType.dir;
 
   Map<String, Object?> toJson() => {
-        'name': name,
-        'type': type.name,
-        'size': size,
-        'modified': modified.millisecondsSinceEpoch,
-        'kind': kind.name,
-      };
+    'name': name,
+    'type': type.name,
+    'size': size,
+    'modified': modified.millisecondsSinceEpoch,
+    'kind': kind.name,
+    if (fileCount != null) 'fileCount': fileCount,
+  };
 
   factory RemoteEntry.fromJson(Map<String, Object?> json) => RemoteEntry(
-        name: json['name'] as String,
-        type: EntryType.values.byName(json['type'] as String),
-        size: (json['size'] as num).toInt(),
-        modified: DateTime.fromMillisecondsSinceEpoch(
-            (json['modified'] as num).toInt()),
-        kind: MediaKind.values.byName(json['kind'] as String),
-      );
+    name: json['name'] as String,
+    type: EntryType.values.byName(json['type'] as String),
+    size: (json['size'] as num).toInt(),
+    modified: DateTime.fromMillisecondsSinceEpoch(
+      (json['modified'] as num).toInt(),
+    ),
+    kind: MediaKind.values.byName(json['kind'] as String),
+    fileCount: (json['fileCount'] as num?)?.toInt(),
+  );
 }
 
 /// Response of [Api.list].
@@ -66,15 +91,15 @@ class Listing {
   final List<RemoteEntry> entries;
 
   Map<String, Object?> toJson() => {
-        'path': path,
-        'entries': [for (final e in entries) e.toJson()],
-      };
+    'path': path,
+    'entries': [for (final e in entries) e.toJson()],
+  };
 
   factory Listing.fromJson(Map<String, Object?> json) => Listing(
-        path: json['path'] as String,
-        entries: [
-          for (final e in json['entries'] as List)
-            RemoteEntry.fromJson((e as Map).cast<String, Object?>()),
-        ],
-      );
+    path: json['path'] as String,
+    entries: [
+      for (final e in json['entries'] as List)
+        RemoteEntry.fromJson((e as Map).cast<String, Object?>()),
+    ],
+  );
 }

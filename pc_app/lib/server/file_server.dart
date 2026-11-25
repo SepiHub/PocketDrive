@@ -11,6 +11,7 @@ import '../identity.dart';
 import 'byte_range.dart';
 import 'devices.dart';
 import 'network.dart';
+import 'move.dart';
 import 'path_jail.dart';
 import 'thumbnails.dart';
 import 'uploads.dart';
@@ -57,6 +58,27 @@ Handler buildHandler(ServerContext c) {
     ..get(Api.file, (Request r) => _file(c.jail, r))
     ..get(Api.thumb, (Request r) => _thumb(c, r))
     ..post(Api.upload, (Request r) => _upload(c, r))
+    ..post(Api.move, (Request r) async {
+      final body = await _readSmallBody(r, 1 << 20);
+      if (body == null) return _error(400, ApiError.badRequest);
+      final List<String> paths;
+      try {
+        paths = [
+          for (final x
+              in (jsonDecode(utf8.decode(body)) as Map)['paths'] as List)
+            x as String,
+        ];
+      } on Object {
+        return _error(400, ApiError.badRequest);
+      }
+      final result = await moveEntries(
+        c.jail,
+        paths,
+        r.url.queryParameters['to'] ?? '',
+      );
+      c.log('Moved ${(result['moved'] as List).length} item(s)');
+      return _json(200, result);
+    })
     ..post(Api.mkdir, (Request r) async {
       final name = r.url.queryParameters['name'];
       if (name == null) return _error(400, ApiError.badRequest);

@@ -4,8 +4,10 @@ import 'package:image_picker/image_picker.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:pocketdrive_shared/pocketdrive_shared.dart';
 
+import 'folder_picker.dart';
 import 'pc_client.dart';
 import 'photo_viewer.dart';
+import 'selection.dart';
 import 'session.dart';
 import 'slideshow_page.dart';
 import 'thumbnails.dart';
@@ -48,6 +50,13 @@ class _BrowserPageState extends State<BrowserPage> {
   bool _notPaired = false;
   bool _loading = true;
 
+  /// Selected file names (folders can't be selected; they're drop targets).
+  Set<String> _selected = {};
+  final _scroll = ScrollController();
+  final _hoverFolder = ValueNotifier<String?>(null);
+
+  bool get _selecting => _selected.isNotEmpty;
+
   String get _title => widget.path.isEmpty
       ? _client.pairing.pcName
       : widget.path.split('/').last;
@@ -65,7 +74,110 @@ class _BrowserPageState extends State<BrowserPage> {
   @override
   void dispose() {
     unawaited(_uploadSub?.cancel());
+    _scroll.dispose();
+    _hoverFolder.dispose();
     super.dispose();
+  }
+
+  List<RemoteEntry> get _files => [
+    for (final e in _listing?.entries ?? const <RemoteEntry>[])
+      if (!e.isDir) e,
+  ];
+
+  void _clearSelection() => setState(() => _selected = {});
+
+  void _selectAll() =>
+      setState(() => _selected = {for (final f in _files) f.name});
+
+  void _toggle(String name) => setState(() {
+    _selected = {..._selected};
+    if (!_selected.remove(name)) _selected.add(name);
+  });
+
+  Future<void> _showSelectionMenu() async {
+    if (!_selecting) return;
+    final n = _selected.length;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text(
+                '$n ${n == 1 ? 'item' : 'items'} selected',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.drive_file_move_outline),
+              title: const Text('Move to folder…'),
+              onTap: () => Navigator.pop(context, 'move'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.select_all),
+              title: const Text('Select all'),
+              onTap: () => Navigator.pop(context, 'all'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.close),
+              title: const Text('Clear selection'),
+              onTap: () => Navigator.pop(context, 'clear'),
+            ),
+          ],
+        ),
+      ),
+    );
+    switch (action) {
+      case 'move':
+        await _moveToPicker();
+      case 'all':
+        _selectAll();
+      case 'clear':
+        _clearSelection();
+    }
+  }
+
+  Future<void> _moveToPicker() async {
+    final dest = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => FolderPickerPage(
+          client: _client,
+          start: widget.path,
+          actionLabel: 'Move to',
+          disabled: {widget.path},
+        ),
+      ),
+    );
+    if (dest != null) await _moveSelected(dest);
+  }
+
+  Future<void> _moveSelected(String dest) async {
+    final names = _selected.toList();
+    if (names.isEmpty || dest == widget.path) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final (moved, failed) = await _client.move([
+        for (final n in names) joinPath(widget.path, n),
+      ], dest);
+      final where = dest.isEmpty ? _client.pairing.pcName : dest;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            failed.isEmpty
+                ? 'Moved $moved ${moved == 1 ? 'item' : 'items'} to "$where"'
+                : 'Moved $moved, ${failed.length} could not be moved',
+          ),
+        ),
+      );
+    } on Object catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Move failed: $e')));
+    }
+    _uploads
+      ..notifyFolderChanged(dest)
+      ..notifyFolderChanged(widget.path);
+    _clearSelection();
   }
 
   Future<void> _upload() async {
@@ -147,7 +259,12 @@ class _BrowserPageState extends State<BrowserPage> {
 
   void _open(RemoteEntry e, List<RemoteEntry> files) {
     final path = joinPath(widget.path, e.name);
+    if (_selecting && !e.isDir) {
+      _toggle(e.name);
+      return;
+    }
     if (e.isDir) {
+      _clearSelection();
       unawaited(
         Navigator.of(context).push(
           MaterialPageRoute<void>(
@@ -184,12 +301,20 @@ class _BrowserPageState extends State<BrowserPage> {
       unawaited(
         Navigator.of(context).push(
           MaterialPageRoute<void>(
-            builder: (_) => VideoPage(
-              relay: widget.session.relay,
-              preview: PcImage(_thumbs, path, e, 256),
-              path: path,
-              entry: e,
-            ),
+            builder: (_) {
+              final videos = [
+                for (final f in files)
+                  if (f.kind == MediaKind.video) f,
+              ];
+              return VideoPage(
+                settings: widget.session.settings,
+                relay: widget.session.relay,
+                thumbs: _thumbs,
+                folder: widget.path,
+                videos: videos,
+                initialIndex: videos.indexOf(e),
+              );
+            },
           ),
         ),
       );
@@ -207,46 +332,78 @@ class _BrowserPageState extends State<BrowserPage> {
       for (final e in listing?.entries ?? const <RemoteEntry>[])
         if (e.kind != MediaKind.other) e,
     ];
-    return Scaffold(
-      floatingActionButton: listing == null
-          ? null
-          : FloatingActionButton.extended(
-              onPressed: _upload,
-              icon: const Icon(Icons.upload),
-              label: const Text('Upload'),
-            ),
-      bottomNavigationBar: UploadBanner(queue: _uploads),
-      appBar: AppBar(
-        title: Text(_title),
-        actions: [
-          if (media.isNotEmpty)
-            IconButton(
-              tooltip: 'Slideshow',
-              onPressed: () => _slideshow(media),
-              icon: const Icon(Icons.slideshow),
-            ),
-          IconButton(
-            tooltip: 'New folder',
-            onPressed: listing == null ? null : _newFolder,
-            icon: const Icon(Icons.create_new_folder_outlined),
-          ),
-          IconButton(
-            tooltip: 'Refresh',
-            onPressed: _loading ? null : _load,
-            icon: const Icon(Icons.refresh),
-          ),
-          if (widget.menu != null) widget.menu!,
-        ],
+    return PopScope(
+      canPop: !_selecting,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _clearSelection();
+      },
+      child: Scaffold(
+        floatingActionButton: listing == null || _selecting
+            ? null
+            : FloatingActionButton.extended(
+                onPressed: _upload,
+                icon: const Icon(Icons.upload),
+                label: const Text('Upload'),
+              ),
+        bottomNavigationBar: UploadBanner(queue: _uploads),
+        appBar: _selecting
+            ? AppBar(
+                leading: IconButton(
+                  tooltip: 'Clear selection',
+                  onPressed: _clearSelection,
+                  icon: const Icon(Icons.close),
+                ),
+                title: Text('${_selected.length} selected'),
+                actions: [
+                  IconButton(
+                    tooltip: 'Select all',
+                    onPressed: _selectAll,
+                    icon: const Icon(Icons.select_all),
+                  ),
+                  IconButton(
+                    tooltip: 'Move to folder',
+                    onPressed: _moveToPicker,
+                    icon: const Icon(Icons.drive_file_move_outline),
+                  ),
+                  IconButton(
+                    tooltip: 'More',
+                    onPressed: _showSelectionMenu,
+                    icon: const Icon(Icons.more_vert),
+                  ),
+                ],
+              )
+            : AppBar(
+                title: Text(_title),
+                actions: [
+                  if (media.isNotEmpty)
+                    IconButton(
+                      tooltip: 'Slideshow',
+                      onPressed: () => _slideshow(media),
+                      icon: const Icon(Icons.slideshow),
+                    ),
+                  IconButton(
+                    tooltip: 'New folder',
+                    onPressed: listing == null ? null : _newFolder,
+                    icon: const Icon(Icons.create_new_folder_outlined),
+                  ),
+                  IconButton(
+                    tooltip: 'Refresh',
+                    onPressed: _loading ? null : _load,
+                    icon: const Icon(Icons.refresh),
+                  ),
+                  if (widget.menu != null) widget.menu!,
+                ],
+              ),
+        body: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _error != null && listing == null
+            ? _ErrorView(
+                message: _error!,
+                actionLabel: _notPaired ? 'Pair again' : 'Try again',
+                onAction: _notPaired ? widget.onNotPaired : _load,
+              )
+            : RefreshIndicator(onRefresh: _load, child: _content(listing!)),
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null && listing == null
-          ? _ErrorView(
-              message: _error!,
-              actionLabel: _notPaired ? 'Pair again' : 'Try again',
-              onAction: _notPaired ? widget.onNotPaired : _load,
-            )
-          : RefreshIndicator(onRefresh: _load, child: _content(listing!)),
     );
   }
 
@@ -269,40 +426,67 @@ class _BrowserPageState extends State<BrowserPage> {
         ],
       );
     }
-    return CustomScrollView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      slivers: [
-        SliverList.builder(
-          itemCount: folders.length,
-          itemBuilder: (context, i) => ListTile(
-            leading: const Icon(Icons.folder),
-            title: Text(folders[i].name),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => _open(folders[i], files),
-          ),
-        ),
-        SliverPadding(
-          padding: const EdgeInsets.all(2),
-          sliver: SliverGrid.builder(
-            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: 130,
-              mainAxisSpacing: 2,
-              crossAxisSpacing: 2,
-            ),
-            itemCount: files.length,
-            itemBuilder: (context, i) => _FileTile(
-              entry: files[i],
-              image: PcImage(
-                _thumbs,
-                joinPath(widget.path, files[i].name),
-                files[i],
-                256,
+    return SelectionGestures(
+      scrollController: _scroll,
+      fileNames: [for (final f in files) f.name],
+      selected: _selected,
+      onSelectionChanged: (s) => setState(() => _selected = s),
+      onDropOnFolder: (name) =>
+          unawaited(_moveSelected(joinPath(widget.path, name))),
+      onHoldMenu: () => unawaited(_showSelectionMenu()),
+      hoverFolder: _hoverFolder,
+      child: CustomScrollView(
+        controller: _scroll,
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
+          SliverList.builder(
+            itemCount: folders.length,
+            itemBuilder: (context, i) => Tagged(
+              tag: FolderTag(folders[i].name),
+              child: ValueListenableBuilder(
+                valueListenable: _hoverFolder,
+                builder: (context, hover, _) => ListTile(
+                  tileColor: hover == folders[i].name
+                      ? Theme.of(context).colorScheme.primaryContainer
+                      : null,
+                  leading: Icon(
+                    hover == folders[i].name ? Icons.folder_open : Icons.folder,
+                  ),
+                  title: FolderName(folders[i]),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _open(folders[i], files),
+                ),
               ),
-              onTap: () => _open(files[i], files),
             ),
           ),
-        ),
-      ],
+          SliverPadding(
+            padding: const EdgeInsets.all(2),
+            sliver: SliverGrid.builder(
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 130,
+                mainAxisSpacing: 2,
+                crossAxisSpacing: 2,
+              ),
+              itemCount: files.length,
+              itemBuilder: (context, i) => Tagged(
+                tag: FileTag(i),
+                child: _FileTile(
+                  entry: files[i],
+                  selecting: _selecting,
+                  selected: _selected.contains(files[i].name),
+                  image: PcImage(
+                    _thumbs,
+                    joinPath(widget.path, files[i].name),
+                    files[i],
+                    256,
+                  ),
+                  onTap: () => _open(files[i], files),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -310,11 +494,15 @@ class _BrowserPageState extends State<BrowserPage> {
 class _FileTile extends StatelessWidget {
   const _FileTile({
     required this.entry,
+    required this.selecting,
+    required this.selected,
     required this.image,
     required this.onTap,
   });
 
   final RemoteEntry entry;
+  final bool selecting;
+  final bool selected;
   final PcImage image;
   final VoidCallback onTap;
 
@@ -354,6 +542,18 @@ class _FileTile extends StatelessWidget {
                   Icons.play_circle_fill,
                   color: Colors.white70,
                   size: 36,
+                ),
+              ),
+            if (selected)
+              ColoredBox(color: scheme.primary.withValues(alpha: 0.30)),
+            if (selecting)
+              Positioned(
+                left: 4,
+                top: 4,
+                child: Icon(
+                  selected ? Icons.check_circle : Icons.radio_button_unchecked,
+                  color: selected ? scheme.primary : Colors.white,
+                  shadows: const [Shadow(blurRadius: 3)],
                 ),
               ),
           ],

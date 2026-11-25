@@ -154,6 +154,7 @@ class PathJail {
               size: 0,
               modified: stat.modified,
               kind: MediaKind.other,
+              fileCount: await _countFiles(target),
             ),
           );
         case FileSystemEntityType.file:
@@ -175,6 +176,19 @@ class PathJail {
       return a.name.toLowerCase().compareTo(b.name.toLowerCase());
     });
     return entries;
+  }
+}
+
+/// Number of visible files directly in [dir] (what the phone would list).
+Future<int?> _countFiles(String dir) async {
+  try {
+    var n = 0;
+    await for (final e in Directory(dir).list(followLinks: false)) {
+      if (e is File && !isHiddenName(p.basename(e.path))) n++;
+    }
+    return n;
+  } on FileSystemException {
+    return null; // unreadable folder: just don't show a count
   }
 }
 

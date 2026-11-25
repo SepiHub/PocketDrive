@@ -31,14 +31,14 @@ class PairingQr {
   final String fingerprint;
 
   String encode() => jsonEncode({
-        'pd': version,
-        'id': pcId,
-        'name': pcName,
-        'hosts': hosts,
-        'port': port,
-        'code': code,
-        'fp': fingerprint,
-      });
+    'pd': version,
+    'id': pcId,
+    'name': pcName,
+    'hosts': hosts,
+    'port': port,
+    'code': code,
+    'fp': fingerprint,
+  });
 
   /// Returns null if [text] isn't a PocketDrive pairing code.
   static PairingQr? tryDecode(String text) {
@@ -72,9 +72,9 @@ class PairRequest {
   Map<String, Object?> toJson() => {'code': code, 'deviceName': deviceName};
 
   factory PairRequest.fromJson(Map<String, Object?> j) => PairRequest(
-        code: j['code'] as String,
-        deviceName: j['deviceName'] as String,
-      );
+    code: j['code'] as String,
+    deviceName: j['deviceName'] as String,
+  );
 }
 
 /// Response of `POST /api/pair`.
@@ -93,18 +93,18 @@ class PairResponse {
   final String pcName;
 
   Map<String, Object?> toJson() => {
-        'token': token,
-        'deviceId': deviceId,
-        'pcId': pcId,
-        'pcName': pcName,
-      };
+    'token': token,
+    'deviceId': deviceId,
+    'pcId': pcId,
+    'pcName': pcName,
+  };
 
   factory PairResponse.fromJson(Map<String, Object?> j) => PairResponse(
-        token: j['token'] as String,
-        deviceId: j['deviceId'] as String,
-        pcId: j['pcId'] as String,
-        pcName: j['pcName'] as String,
-      );
+    token: j['token'] as String,
+    deviceId: j['deviceId'] as String,
+    pcId: j['pcId'] as String,
+    pcName: j['pcName'] as String,
+  );
 }
 
 /// Response of `GET /api/info`.

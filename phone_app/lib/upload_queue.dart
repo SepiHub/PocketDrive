@@ -38,8 +38,11 @@ class UploadQueue extends ChangeNotifier {
   bool _running = false;
   DateTime _lastNotify = DateTime(0);
 
-  /// Fires with a folder path whenever a file landed in it.
+  /// Fires with a folder path whenever a file landed in it (uploads, moves).
   Stream<String> get folderChanged => _folderChanged.stream;
+
+  /// Tells open folder screens that [folder] changed (e.g. after a move).
+  void notifyFolderChanged(String folder) => _folderChanged.add(folder);
 
   bool get busy => items.any((i) => !i.finished);
   int get doneCount => items.where((i) => i.state == UploadState.done).length;

@@ -223,6 +223,24 @@ class PcClient {
     }
   }
 
+  /// Moves [paths] into folder [to]. Returns how many moved, and the paths
+  /// that failed with their error codes.
+  Future<(int, Map<String, String>)> move(List<String> paths, String to) async {
+    final h = await connect();
+    final res = await _send(
+      _http,
+      'POST',
+      _uri(h, Api.move, {'to': to}),
+      token: pairing.token,
+      body: {'paths': paths},
+    );
+    final failed = <String, String>{
+      for (final f in res['failed'] as List)
+        (f as Map)['path'] as String: f['error'] as String,
+    };
+    return ((res['moved'] as List).length, failed);
+  }
+
   /// Creates folder [name] inside [parent] on the PC.
   Future<RemoteEntry> mkdir(String parent, String name) async {
     final h = await connect();

@@ -25,8 +25,8 @@ HttpClient pinnedHttpClient(String fingerprint) {
   final client = HttpClient(context: SecurityContext(withTrustedRoots: false))
     ..connectionTimeout = const Duration(seconds: 5)
     ..idleTimeout = const Duration(seconds: 30);
-  client.badCertificateCallback =
-      (cert, host, port) => constantTimeEquals(certFingerprint(cert.der), fingerprint);
+  client.badCertificateCallback = (cert, host, port) =>
+      constantTimeEquals(certFingerprint(cert.der), fingerprint);
   return client;
 }
 

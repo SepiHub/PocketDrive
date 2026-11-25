@@ -7,6 +7,8 @@ class AppSettings extends ChangeNotifier {
   AppSettings._(this._prefs);
 
   static const _slideSecondsKey = 'slideshow_photo_seconds';
+  static const _mutedKey = 'video_muted';
+  static const _loopKey = 'video_loop';
   static const defaultSlideSeconds = 5;
   static const slideSecondsChoices = [2, 3, 5, 8, 10, 15, 20, 30];
 
@@ -18,6 +20,22 @@ class AppSettings extends ChangeNotifier {
   /// How long each photo stays on screen in a slideshow.
   int get slideSeconds =>
       _prefs.getInt(_slideSecondsKey) ?? defaultSlideSeconds;
+
+  /// Videos start muted when true; remembered across app restarts.
+  bool get videoMuted => _prefs.getBool(_mutedKey) ?? false;
+
+  /// Videos repeat from the start when they end; remembered.
+  bool get videoLoop => _prefs.getBool(_loopKey) ?? false;
+
+  Future<void> setVideoLoop(bool loop) async {
+    await _prefs.setBool(_loopKey, loop);
+    notifyListeners();
+  }
+
+  Future<void> setVideoMuted(bool muted) async {
+    await _prefs.setBool(_mutedKey, muted);
+    notifyListeners();
+  }
 
   Future<void> setSlideSeconds(int seconds) async {
     await _prefs.setInt(_slideSecondsKey, seconds);

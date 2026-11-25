@@ -142,6 +142,12 @@ void main() {
       expect(entries.firstWhere((e) => e.name == 'a.txt').size, 11);
     });
 
+    test('folders report how many files they hold', () async {
+      final entries = await jail.list('');
+      expect(entries.firstWhere((e) => e.name == 'sub').fileCount, 1);
+      expect(entries.firstWhere((e) => e.name == 'a.txt').fileCount, isNull);
+    });
+
     test('listing a file is refused', () async {
       await expectLater(jail.list('a.txt'), throwsA(isA<NotADirectory>()));
     });
