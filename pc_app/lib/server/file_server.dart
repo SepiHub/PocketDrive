@@ -7,16 +7,49 @@ import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_router/shelf_router.dart';
 
+import '../identity.dart';
 import 'byte_range.dart';
+import 'devices.dart';
+import 'network.dart';
 import 'path_jail.dart';
 
-/// Builds the HTTP handler for one shared folder.
-Handler buildHandler(PathJail jail, {void Function(String)? log}) {
+/// Everything the request handlers need.
+class ServerContext {
+  ServerContext({
+    required this.jail,
+    required this.devices,
+    required this.identity,
+    required this.pairingWindow,
+    this.onPaired,
+    void Function(String)? log,
+  }) : log = log ?? ((_) {});
+
+  final PathJail jail;
+  final DeviceStore devices;
+  final PcIdentity identity;
+
+  /// The currently open pairing window, if any.
+  final PairingWindow? Function() pairingWindow;
+  final void Function(PairedDevice)? onPaired;
+  final void Function(String) log;
+}
+
+/// Builds the HTTP handler.
+///
+/// Order of checks on every request: errors are caught -> the client must be
+/// on a local network -> it must carry a valid device token (except for
+/// `/api/pair`) -> the route runs, and every file path goes through the jail.
+Handler buildHandler(ServerContext c) {
   final router = Router()
-    ..get(Api.list, (Request r) => _list(jail, r))
-    ..get(Api.file, (Request r) => _file(jail, r));
+    ..post(Api.pair, (Request r) => _pair(c, r))
+    ..get(Api.info, (Request r) => _json(200,
+        PcInfo(pcId: c.identity.pcId, pcName: c.identity.pcName).toJson()))
+    ..get(Api.list, (Request r) => _list(c.jail, r))
+    ..get(Api.file, (Request r) => _file(c.jail, r));
   return const Pipeline()
-      .addMiddleware(_errorMiddleware(log ?? (_) {}))
+      .addMiddleware(_errorMiddleware(c.log))
+      .addMiddleware(_localNetworkOnly(c.log))
+      .addMiddleware(_requireDeviceToken(c.devices))
       .addHandler(router.call);
 }
 
@@ -29,6 +62,53 @@ Response _json(int status, Object body) => Response(
     );
 
 Response _error(int status, String code) => _json(status, {'error': code});
+
+const _maxPairBody = 4096;
+
+/// Reads a request body of at most [max] bytes; null if it's bigger.
+Future<List<int>?> _readSmallBody(Request r, int max) async {
+  if ((r.contentLength ?? 0) > max) return null;
+  final bytes = <int>[];
+  await for (final chunk in r.read()) {
+    bytes.addAll(chunk);
+    if (bytes.length > max) return null;
+  }
+  return bytes;
+}
+
+Future<Response> _pair(ServerContext c, Request r) async {
+  final window = c.pairingWindow();
+  if (window == null || !window.isOpen) {
+    return _error(403, ApiError.pairingClosed);
+  }
+  final body = await _readSmallBody(r, _maxPairBody);
+  if (body == null) return _error(400, ApiError.badRequest);
+  final PairRequest req;
+  try {
+    req = PairRequest.fromJson(
+        (jsonDecode(utf8.decode(body)) as Map).cast<String, Object?>());
+  } on Object {
+    return _error(400, ApiError.badRequest);
+  }
+  if (!window.tryConsume(req.code)) {
+    c.log('Wrong pairing code from ${_remote(r)?.remoteAddress.address}');
+    return _error(403, ApiError.pairingClosed);
+  }
+  var name = req.deviceName.replaceAll(RegExp(r'[\x00-\x1F]'), '').trim();
+  if (name.length > 64) name = name.substring(0, 64);
+  final (device, token) = await c.devices.add(name);
+  c.log('Paired ${device.name} (${device.id})');
+  c.onPaired?.call(device);
+  return _json(
+    200,
+    PairResponse(
+      token: token,
+      deviceId: device.id,
+      pcId: c.identity.pcId,
+      pcName: c.identity.pcName,
+    ).toJson(),
+  );
+}
 
 Future<Response> _list(PathJail jail, Request r) async {
   final rel = _pathParam(r);
@@ -77,6 +157,37 @@ Future<Response> _file(PathJail jail, Request r) async {
   );
 }
 
+HttpConnectionInfo? _remote(Request r) =>
+    r.context['shelf.io.connection_info'] as HttpConnectionInfo?;
+
+/// Refuses clients that aren't on this PC or a local network. (When remote
+/// access comes, this is the one place to relax.)
+Middleware _localNetworkOnly(void Function(String) log) =>
+    (inner) => (request) {
+          final remote = _remote(request)?.remoteAddress;
+          if (remote == null || !isLocalNetworkAddress(remote)) {
+            log('Refused non-local client ${remote?.address}');
+            return _error(403, ApiError.notLocalNetwork);
+          }
+          return inner(request);
+        };
+
+/// Every request except pairing must carry a paired device's token.
+Middleware _requireDeviceToken(DeviceStore devices) =>
+    (inner) => (request) {
+          if ('/${request.url.path}' == Api.pair) return inner(request);
+          final header = request.headers[Api.authHeader] ?? '';
+          const prefix = 'Bearer ';
+          final device = header.startsWith(prefix)
+              ? devices.findByToken(header.substring(prefix.length).trim())
+              : null;
+          if (device == null) {
+            return _json(401, {'error': ApiError.unauthorized});
+          }
+          devices.touch(device);
+          return inner(request.change(context: {'device': device}));
+        };
+
 /// Turns our exceptions into short JSON errors. Details go to the log only,
 /// so a client never learns anything about the PC's folders.
 Middleware _errorMiddleware(void Function(String) log) =>
@@ -99,7 +210,7 @@ Middleware _errorMiddleware(void Function(String) log) =>
           }
         };
 
-/// Runs the HTTP server for one shared folder.
+/// Runs the HTTPS server for one shared folder.
 class PocketServer {
   HttpServer? _server;
 
@@ -107,22 +218,36 @@ class PocketServer {
   int? get port => _server?.port;
   InternetAddress? get address => _server?.address;
 
-  /// Until pairing exists (stage 2) the server only listens on this PC
-  /// (loopback), so nothing on the network can reach it.
+  /// Listens on all of this PC's IPv4 addresses by default. Windows Firewall
+  /// asks once whether to allow that.
   Future<void> start({
     required String folder,
+    required DeviceStore devices,
+    required PcIdentity identity,
+    required PairingWindow? Function() pairingWindow,
+    void Function(PairedDevice)? onPaired,
     InternetAddress? address,
     int port = Api.defaultPort,
     void Function(String)? log,
   }) async {
     await stop();
     final jail = await PathJail.open(folder);
+    final handler = buildHandler(ServerContext(
+      jail: jail,
+      devices: devices,
+      identity: identity,
+      pairingWindow: pairingWindow,
+      onPaired: onPaired,
+      log: log,
+    ));
     final server = await shelf_io.serve(
-      buildHandler(jail, log: log),
-      address ?? InternetAddress.loopbackIPv4,
+      handler,
+      address ?? InternetAddress.anyIPv4,
       port,
+      securityContext: identity.securityContext(),
     );
     server.autoCompress = false;
+    server.idleTimeout = const Duration(seconds: 30);
     _server = server;
   }
 

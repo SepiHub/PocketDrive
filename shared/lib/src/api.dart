@@ -1,3 +1,5 @@
+import 'pairing.dart';
+
 /// HTTP endpoints of the PC server. Every `path` query parameter is relative
 /// to the shared folder and uses `/` as separator; an empty path means the
 /// shared folder itself.
@@ -16,8 +18,16 @@ abstract final class Api {
   /// `POST ?path=` -> upload into a folder (stage 5).
   static const String upload = '/api/upload';
 
-  /// `POST` -> exchange a one-time pairing code for a device token (stage 2).
+  /// `POST` [PairRequest] -> [PairResponse]. The only endpoint that needs no
+  /// device token; works only while the PC shows a pairing QR code.
   static const String pair = '/api/pair';
+
+  /// `GET` -> [PcInfo]. Cheap check that the token and PC are right.
+  static const String info = '/api/info';
+
+  /// Header carrying the device token: `Authorization: Bearer <token>`.
+  static const String authHeader = 'authorization';
+  static String bearer(String token) => 'Bearer $token';
 }
 
 /// Error codes the server puts in `{"error": "<code>"}` bodies.
@@ -28,4 +38,8 @@ abstract final class ApiError {
   static const String notAFile = 'not_a_file';
   static const String unreadable = 'unreadable';
   static const String internal = 'internal';
+  static const String unauthorized = 'unauthorized';
+  static const String pairingClosed = 'pairing_closed';
+  static const String badRequest = 'bad_request';
+  static const String notLocalNetwork = 'not_local_network';
 }

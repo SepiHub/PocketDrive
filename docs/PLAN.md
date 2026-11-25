@@ -38,7 +38,7 @@ Nothing in auth or the protocol assumes the LAN. The server currently refuses no
 | # | Stage | Test |
 |---|---|---|
 | 1 ✅ | PC server + folder picker | Unit tests for traversal/junction escapes; `curl` locally (server bound to localhost until auth exists) |
-| 2 | Pairing (QR + token) + HTTPS | Scan from the phone; no/wrong/revoked token is rejected |
+| 2 ✅ | Pairing (QR + token) + HTTPS | Scan from the phone; no/wrong/revoked token is rejected |
 | 3 | Phone browsing + thumbnails | Install on the phone, browse, check the grid |
 | 4 | Video streaming | Play a large video and seek around |
 | 5 | Uploads from the gallery | Upload photos and a large video; check names and sizes |

@@ -1,5 +1,5 @@
 name: pocketdrive_phone
-description: "A new Flutter project."
+description: "PocketDrive phone app: browse and upload to your PC."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -35,6 +35,11 @@ dependencies:
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
+  mobile_scanner: ^7.5.0
+  flutter_secure_storage: ^11.2.0
+  device_info_plus: ^13.3.0
+  pocketdrive_shared:
+    path: ../shared
 
 dev_dependencies:
   flutter_test:
