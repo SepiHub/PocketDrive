@@ -27,8 +27,11 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
+  // Started at login with --hidden: stay in the tray, don't show a window.
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
-    this->Show();
+    if (wcsstr(::GetCommandLineW(), L"--hidden") == nullptr) {
+      this->Show();
+    }
   });
 
   // Flutter can complete the first frame before the "show window" callback is

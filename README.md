@@ -2,10 +2,22 @@
 
 Use a folder on your Windows PC as extra storage for your Android phone, over your home Wi-Fi.
 
-- **PC app (Windows, Flutter):** pick one shared folder; a local HTTPS server exposes only that folder (list, download, upload, video streaming with seeking, photo/video thumbnails). Shows a QR code for pairing, advertises itself with mDNS, lives in the system tray.
-- **Phone app (Android, Flutter):** scan the QR code once to pair, then find the PC automatically. Browse folders, view photos in a grid, play videos, upload from the gallery.
+## Features
 
-> Status: in development. See [docs/PLAN.md](docs/PLAN.md) for the design and build stages.
+**PC app (Windows, Flutter)**
+- Share one folder through a local HTTPS server: list, download, ranged streaming, thumbnails (Windows' own thumbnail engine, photos and videos), upload, new folder, move, delete (to the Recycle Bin).
+- Pair phones with a QR code; see and remove paired phones.
+- Announces itself on the network (mDNS) so phones find it after an address change.
+- Lives in the system tray: closing the window keeps sharing; optional start with Windows.
+
+**Phone app (Android, Flutter)**
+- Pair once by scanning the QR code; finds the PC by itself afterwards ("Find my PC" in the menu).
+- Browse folders (with file counts), sort by name, date or size, preview grid, full-screen photo viewer with pinch and double-tap zoom, animated GIFs.
+- Video player with seeking, swipe between videos, zoom, mute, loop and speed.
+- Slideshow of a folder (shuffle, configurable photo time, videos play to the end).
+- Upload from the gallery or the Files app (no limit), Gallery-style multi-select to move or delete.
+
+See [docs/PLAN.md](docs/PLAN.md) for the design and how it was built in stages.
 
 ## Security model
 

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
@@ -12,8 +13,8 @@ import 'thumbnails.dart';
 import 'video_page.dart' show slideTransition;
 import 'video_relay.dart';
 
-/// Plays every photo, GIF and video of one folder in order, then starts
-/// over. Photos and GIFs stay for the time set in Settings; videos play to
+/// Plays every photo, GIF and video of one folder in order (or shuffled),
+/// then starts over. Photos and GIFs stay for the time set in Settings; videos play to
 /// the end. Tap to show the controls (they hide again after 4 seconds).
 class SlideshowPage extends StatefulWidget {
   const SlideshowPage({
@@ -36,13 +37,67 @@ class SlideshowPage extends StatefulWidget {
 }
 
 class _SlideshowPageState extends State<SlideshowPage> {
-  int _index = 0;
+  /// Play order (indexes into the items) and where we are in it. In
+  /// shuffle mode it's a random order without repeats, reshuffled each round.
+  late List<int> _order = _makeOrder();
+  int _pos = 0;
+  int get _index => _order[_pos];
+  final _random = Random();
   bool _playing = true;
   bool _controls = false;
+
+  /// Video players for the current item and the next one, loaded ahead so
+  /// the next video's real first frame is ready (no preview-image flicker).
+  final _videos = <int, VideoPlayerController>{};
+  final _videoReady = <int>{};
+  final _videoFailed = <int>{};
+  int? _shownIndex;
+  int? _endHandledFor;
+
+  /// The ⏮/⏭ buttons switch instantly (no slide or fade).
+  bool _instant = false;
   Timer? _slideTimer;
   Timer? _hideTimer;
 
   RemoteEntry get _current => widget.items[_index];
+
+  bool get _shuffle => widget.settings.slideShuffle;
+
+  /// Normal order, or a shuffled one. [first] stays first (so turning
+  /// shuffle on keeps showing the current item); [avoidFirst] isn't first
+  /// (so a new round doesn't repeat the item just shown).
+  List<int> _makeOrder({int? first, int? avoidFirst}) {
+    final order = List<int>.generate(widget.items.length, (i) => i);
+    if (!_shuffle) return order;
+    order.shuffle(_random);
+    if (first != null) {
+      order
+        ..remove(first)
+        ..insert(0, first);
+    } else if (avoidFirst != null &&
+        order.length > 1 &&
+        order.first == avoidFirst) {
+      order
+        ..removeAt(0)
+        ..add(avoidFirst);
+    }
+    return order;
+  }
+
+  void _toggleShuffle() {
+    final current = _index;
+    unawaited(
+      widget.settings.setSlideShuffle(!_shuffle).then((_) {
+        if (!mounted) return;
+        setState(() {
+          _order = _makeOrder(first: current);
+          _pos = _order.indexOf(current);
+        });
+      }),
+    );
+    _showControls();
+  }
+
   String _path(RemoteEntry e) => joinPath(widget.folder, e.name);
 
   PcImage _image(RemoteEntry e) =>
@@ -62,14 +117,101 @@ class _SlideshowPageState extends State<SlideshowPage> {
   void dispose() {
     _slideTimer?.cancel();
     _hideTimer?.cancel();
+    for (final c in _videos.values) {
+      unawaited(c.dispose());
+    }
     unawaited(WakelockPlus.disable());
     unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
     super.dispose();
   }
 
+  int get _nextIndex => _order[(_pos + 1) % _order.length];
+
+  /// Loads video [i] paused at its first frame (plays it if it's showing).
+  Future<void> _prepareVideo(int i) async {
+    if (_videos.containsKey(i) || _videoFailed.contains(i)) return;
+    if (widget.items[i].kind != MediaKind.video) return;
+    VideoPlayerController? c;
+    try {
+      final url = await widget.relay.urlFor(_path(widget.items[i]));
+      if (!mounted || _videos.containsKey(i)) return;
+      c = VideoPlayerController.networkUrl(url);
+      _videos[i] = c;
+      await c.initialize();
+      if (!mounted || _videos[i] != c) return;
+      await c.setVolume(widget.settings.videoMuted ? 0 : 1);
+      final controller = c;
+      controller.addListener(() => _onVideoTick(i, controller));
+      _videoReady.add(i);
+      if (i == _index && _playing) await c.play();
+      if (mounted) setState(() {});
+    } on Object {
+      _videoFailed.add(i);
+      if (_videos[i] == c) _videos.remove(i);
+      // Can't play this one: skip it after a moment.
+      if (mounted && i == _index) {
+        Timer(const Duration(seconds: 2), () {
+          if (mounted && _index == i) _next();
+        });
+      }
+    }
+  }
+
+  void _onVideoTick(int i, VideoPlayerController c) {
+    if (i != _index || _endHandledFor == i) return;
+    final v = c.value;
+    if (v.isInitialized &&
+        !v.isPlaying &&
+        v.duration > Duration.zero &&
+        v.position >= v.duration - const Duration(milliseconds: 200)) {
+      _endHandledFor = i;
+      _next();
+    }
+  }
+
+  /// Keeps the current and next videos loaded, plays only the current one
+  /// (from the start when it just came on screen), frees the rest.
+  void _syncVideos() {
+    final current = _index;
+    final arrived = _shownIndex != current;
+    _shownIndex = current;
+    if (arrived) _endHandledFor = null;
+    unawaited(_prepareVideo(current));
+    unawaited(_prepareVideo(_nextIndex));
+    for (final MapEntry(key: i, value: c) in _videos.entries) {
+      if (i != current && c.value.isPlaying) unawaited(c.pause());
+    }
+    final c = _videos[current];
+    if (c != null && _videoReady.contains(current)) {
+      if (arrived) {
+        unawaited(
+          c.seekTo(Duration.zero).then((_) {
+            if (_playing && _index == current) unawaited(c.play());
+          }),
+        );
+      } else {
+        unawaited(_playing ? c.play() : c.pause());
+      }
+    } else if (_videoFailed.contains(current) && _playing) {
+      Timer(const Duration(seconds: 2), () {
+        if (mounted && _index == current) _next();
+      });
+    }
+    // Free players we no longer need, after any transition has finished.
+    Timer(const Duration(milliseconds: 700), () {
+      if (!mounted) return;
+      final keep = {_index, _nextIndex};
+      for (final i in _videos.keys.where((k) => !keep.contains(k)).toList()) {
+        _videoReady.remove(i);
+        unawaited(_videos.remove(i)!.dispose());
+      }
+    });
+  }
+
   /// Photos get a timer; videos advance themselves when they end.
   void _startSlide() {
     _slideTimer?.cancel();
+    _syncVideos();
     if (_playing && _current.kind != MediaKind.video) {
       _slideTimer = Timer(
         Duration(seconds: widget.settings.slideSeconds),
@@ -77,7 +219,7 @@ class _SlideshowPageState extends State<SlideshowPage> {
       );
     }
     // Load the next photo ahead of time so the change is instant.
-    final next = widget.items[(_index + 1) % widget.items.length];
+    final next = widget.items[_order[(_pos + 1) % _order.length]];
     if (next.kind == MediaKind.image) {
       unawaited(precacheImage(_image(next), context, onError: (_, _) {}));
     }
@@ -87,11 +229,19 @@ class _SlideshowPageState extends State<SlideshowPage> {
   /// automatic advance (crossfade).
   int _direction = 0;
 
-  void _go(int delta, {bool manual = true}) {
+  void _go(int delta, {bool manual = true, bool instant = false}) {
     setState(() {
+      _instant = instant;
       _direction = manual ? delta : 0;
-      _index = (_index + delta) % widget.items.length;
-      if (_index < 0) _index += widget.items.length;
+      final n = _order.length;
+      final p = _pos + delta;
+      if (p >= n && _shuffle) {
+        // Next round: a fresh random order.
+        _order = _makeOrder(avoidFirst: _index);
+        _pos = 0;
+      } else {
+        _pos = ((p % n) + n) % n;
+      }
     });
     _startSlide();
   }
@@ -138,7 +288,9 @@ class _SlideshowPageState extends State<SlideshowPage> {
           fit: StackFit.expand,
           children: [
             AnimatedSwitcher(
-              duration: Duration(milliseconds: _direction == 0 ? 600 : 320),
+              duration: _instant
+                  ? Duration.zero
+                  : Duration(milliseconds: _direction == 0 ? 600 : 320),
               transitionBuilder: (child, animation) => _direction == 0
                   ? FadeTransition(opacity: animation, child: child)
                   : slideTransition(
@@ -150,13 +302,9 @@ class _SlideshowPageState extends State<SlideshowPage> {
               child: KeyedSubtree(
                 key: ValueKey(_index),
                 child: e.kind == MediaKind.video
-                    ? _SlideVideo(
-                        muted: widget.settings.videoMuted,
-                        relay: widget.relay,
-                        path: _path(e),
-                        preview: PcImage(widget.thumbs, _path(e), e, 256),
-                        playing: _playing,
-                        onFinished: _next,
+                    ? _VideoFrame(
+                        controller: _videos[_index],
+                        ready: _videoReady.contains(_index),
                       )
                     : Image(
                         image: _image(e),
@@ -207,7 +355,7 @@ class _SlideshowPageState extends State<SlideshowPage> {
                             Padding(
                               padding: const EdgeInsets.only(right: 16),
                               child: Text(
-                                '${_index + 1} / ${widget.items.length}',
+                                '${_pos + 1} / ${widget.items.length}',
                                 style: const TextStyle(color: Colors.white),
                               ),
                             ),
@@ -229,7 +377,7 @@ class _SlideshowPageState extends State<SlideshowPage> {
                               iconSize: 32,
                               tooltip: 'Previous',
                               onPressed: () {
-                                _go(-1);
+                                _go(-1, instant: true);
                                 _showControls();
                               },
                               icon: const Icon(Icons.skip_previous),
@@ -250,10 +398,24 @@ class _SlideshowPageState extends State<SlideshowPage> {
                               iconSize: 32,
                               tooltip: 'Next',
                               onPressed: () {
-                                _go(1);
+                                _go(1, instant: true);
                                 _showControls();
                               },
                               icon: const Icon(Icons.skip_next),
+                            ),
+                            const SizedBox(width: 24),
+                            IconButton(
+                              color: _shuffle
+                                  ? Colors.tealAccent
+                                  : Colors.white,
+                              iconSize: 28,
+                              tooltip: _shuffle ? 'Shuffle on' : 'Shuffle off',
+                              onPressed: _toggleShuffle,
+                              icon: Icon(
+                                _shuffle
+                                    ? Icons.shuffle_on_outlined
+                                    : Icons.shuffle,
+                              ),
                             ),
                             const SizedBox(width: 24),
                             // Same remembered setting as the video player.
@@ -267,6 +429,12 @@ class _SlideshowPageState extends State<SlideshowPage> {
                                 await widget.settings.setVideoMuted(
                                   !widget.settings.videoMuted,
                                 );
+                                final volume = widget.settings.videoMuted
+                                    ? 0.0
+                                    : 1.0;
+                                for (final c in _videos.values) {
+                                  unawaited(c.setVolume(volume));
+                                }
                                 if (mounted) setState(() {});
                                 _showControls();
                               },
@@ -310,105 +478,22 @@ class _Bar extends StatelessWidget {
   );
 }
 
-/// A video inside the slideshow: plays once, then calls [onFinished].
-class _SlideVideo extends StatefulWidget {
-  const _SlideVideo({
-    required this.muted,
-    required this.relay,
-    required this.path,
-    required this.preview,
-    required this.playing,
-    required this.onFinished,
-  });
-
-  final bool muted;
-  final VideoRelay relay;
-  final String path;
-  final PcImage preview;
-  final bool playing;
-  final VoidCallback onFinished;
-
-  @override
-  State<_SlideVideo> createState() => _SlideVideoState();
-}
-
-class _SlideVideoState extends State<_SlideVideo> {
-  VideoPlayerController? _video;
-  bool _finished = false;
-
-  @override
-  void initState() {
-    super.initState();
-    unawaited(_init());
-  }
-
-  Future<void> _init() async {
-    try {
-      final video = VideoPlayerController.networkUrl(
-        await widget.relay.urlFor(widget.path),
-      );
-      _video = video;
-      await video.initialize();
-      if (!mounted) return;
-      video.addListener(_onTick);
-      await video.setVolume(widget.muted ? 0 : 1);
-      if (widget.playing) await video.play();
-      setState(() {});
-    } on Object {
-      // Can't play this one: skip it after a moment.
-      if (mounted) Timer(const Duration(seconds: 2), _finish);
-    }
-  }
-
-  void _onTick() {
-    final v = _video!.value;
-    if (v.isInitialized &&
-        !v.isPlaying &&
-        v.duration > Duration.zero &&
-        v.position >= v.duration - const Duration(milliseconds: 200)) {
-      _finish();
-    }
-  }
-
-  void _finish() {
-    if (_finished || !mounted) return;
-    _finished = true;
-    widget.onFinished();
-  }
-
-  @override
-  void didUpdateWidget(_SlideVideo old) {
-    super.didUpdateWidget(old);
-    final v = _video;
-    if (v != null && v.value.isInitialized && old.playing != widget.playing) {
-      unawaited(widget.playing ? v.play() : v.pause());
-    }
-    if (v != null && v.value.isInitialized && old.muted != widget.muted) {
-      unawaited(v.setVolume(widget.muted ? 0 : 1));
-    }
-  }
-
-  @override
-  void dispose() {
-    _video?.removeListener(_onTick);
-    unawaited(_video?.dispose());
-    super.dispose();
-  }
+/// Shows a slideshow video whose player the page loaded ahead of time.
+class _VideoFrame extends StatelessWidget {
+  const _VideoFrame({required this.controller, required this.ready});
+  final VideoPlayerController? controller;
+  final bool ready;
 
   @override
   Widget build(BuildContext context) {
-    final v = _video;
-    if (v == null || !v.value.isInitialized) {
-      return Image(
-        image: widget.preview,
-        fit: BoxFit.contain,
-        errorBuilder: (_, _, _) => const SizedBox.shrink(),
-      );
+    final c = controller;
+    if (c == null || !ready) {
+      return const Center(child: CircularProgressIndicator());
     }
     return Center(
       child: AspectRatio(
-        aspectRatio: v.value.aspectRatio,
-        child: VideoPlayer(v),
+        aspectRatio: c.value.aspectRatio,
+        child: VideoPlayer(c),
       ),
     );
   }

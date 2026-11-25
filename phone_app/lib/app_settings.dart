@@ -9,6 +9,9 @@ class AppSettings extends ChangeNotifier {
   static const _slideSecondsKey = 'slideshow_photo_seconds';
   static const _mutedKey = 'video_muted';
   static const _loopKey = 'video_loop';
+  static const _shuffleKey = 'slideshow_shuffle';
+  static const _sortByKey = 'sort_by';
+  static const _sortDescKey = 'sort_desc';
   static const defaultSlideSeconds = 5;
   static const slideSecondsChoices = [2, 3, 5, 8, 10, 15, 20, 30];
 
@@ -37,11 +40,32 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Slideshow plays items in random order; remembered.
+  bool get slideShuffle => _prefs.getBool(_shuffleKey) ?? false;
+
+  Future<void> setSlideShuffle(bool on) async {
+    await _prefs.setBool(_shuffleKey, on);
+    notifyListeners();
+  }
+
+  /// How folders are sorted on the phone; remembered.
+  SortBy get sortBy =>
+      SortBy.values.asNameMap()[_prefs.getString(_sortByKey)] ?? SortBy.name;
+  bool get sortDescending => _prefs.getBool(_sortDescKey) ?? false;
+
+  Future<void> setSort(SortBy by, {required bool descending}) async {
+    await _prefs.setString(_sortByKey, by.name);
+    await _prefs.setBool(_sortDescKey, descending);
+    notifyListeners();
+  }
+
   Future<void> setSlideSeconds(int seconds) async {
     await _prefs.setInt(_slideSecondsKey, seconds);
     notifyListeners();
   }
 }
+
+enum SortBy { name, date, size }
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key, required this.settings});

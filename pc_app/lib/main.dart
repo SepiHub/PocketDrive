@@ -7,14 +7,17 @@ import 'package:path/path.dart' as p;
 import 'package:pocketdrive_shared/pocketdrive_shared.dart';
 
 import 'config.dart';
+import 'desktop.dart';
 import 'identity.dart';
 import 'pairing_dialog.dart';
 import 'server/devices.dart';
 import 'server/file_server.dart';
+import 'server/announce.dart';
 import 'server/network.dart';
 import 'server/thumbnails.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const PocketDriveApp());
 }
 
@@ -45,6 +48,13 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final _server = PocketServer();
+  final _announcer = Announcer();
+  late final _shell = DesktopShell(
+    onToggleSharing: () =>
+        unawaited(_server.isRunning ? _stopServer() : _startServer()),
+    onQuit: _quit,
+  );
+  bool _startAtLogin = false;
   final _paired = StreamController<PairedDevice>.broadcast();
   final _thumbs = ThumbnailService(
     Directory(
@@ -69,7 +79,21 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    _shell.init();
+    unawaited(
+      StartAtLogin.isEnabled().then((on) {
+        if (mounted) setState(() => _startAtLogin = on);
+      }),
+    );
     unawaited(_init());
+  }
+
+  /// Fully exits (the window's close button only hides to the tray).
+  Future<void> _quit() async {
+    await _announcer.stop();
+    await _server.stop();
+    _shell.dispose();
+    exit(0);
   }
 
   Future<void> _init() async {
@@ -102,6 +126,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    unawaited(_announcer.stop());
     unawaited(_server.stop());
     unawaited(_devicesSub?.cancel());
     unawaited(_paired.close());
@@ -148,11 +173,22 @@ class _HomePageState extends State<HomePage> {
     } on Object catch (e) {
       _error = 'Could not start the server: $e';
     }
+    if (_server.isRunning) {
+      await _announcer.start(
+        pcId: _identity!.pcId,
+        pcName: _identity!.pcName,
+        port: _server.port!,
+        log: debugPrint,
+      );
+    }
+    _shell.updateSharing(sharing: _server.isRunning);
     setState(() => _busy = false);
   }
 
   Future<void> _stopServer() async {
+    await _announcer.stop();
     await _server.stop();
+    _shell.updateSharing(sharing: false);
     setState(() {});
   }
 
@@ -278,6 +314,24 @@ class _HomePageState extends State<HomePage> {
                           : (_server.isRunning ? _stopServer : _startServer),
                       child: Text(_server.isRunning ? 'Stop' : 'Start'),
                     ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            child: SwitchListTile(
+              secondary: const Icon(Icons.power_settings_new),
+              title: const Text('Start with Windows'),
+              subtitle: const Text(
+                'Starts in the tray when you sign in. Closing this window '
+                'keeps PocketDrive running in the tray; quit from the tray '
+                'icon.',
+              ),
+              value: _startAtLogin,
+              onChanged: (on) async {
+                await StartAtLogin.setEnabled(on);
+                final now = await StartAtLogin.isEnabled();
+                if (mounted) setState(() => _startAtLogin = now);
+              },
             ),
           ),
           if (_error != null) ...[

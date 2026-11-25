@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:pocketdrive_shared/pocketdrive_shared.dart';
 
 import 'browser_page.dart';
+import 'discovery.dart';
 import 'app_settings.dart';
 import 'pairing_store.dart';
 import 'pc_client.dart';
@@ -233,6 +234,35 @@ class _PcPageState extends State<PcPage> {
     super.dispose();
   }
 
+  /// Searches the Wi-Fi for the paired PC and reconnects to it.
+  Future<void> _findPc() async {
+    final messenger = ScaffoldMessenger.of(context)
+      ..showSnackBar(const SnackBar(content: Text('Looking for your PC…')));
+    final found = await discoverPcAddresses(widget.pairing.pcId);
+    messenger.hideCurrentSnackBar();
+    if (found.isEmpty) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text(
+            "Didn't find your PC on this Wi-Fi. Is PocketDrive "
+            'running there, and is the phone on the same network?',
+          ),
+        ),
+      );
+      return;
+    }
+    _client.forgetHost();
+    for (final h in found) {
+      if (!widget.pairing.hosts.contains(h)) widget.pairing.hosts.add(h);
+    }
+    widget.onHostChanged(found.first);
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text('Found ${widget.pairing.pcName} at ${found.join(', ')}'),
+      ),
+    );
+  }
+
   Future<void> _confirmUnpair() async {
     final ok = await showDialog<bool>(
       context: context,
@@ -267,6 +297,8 @@ class _PcPageState extends State<PcPage> {
         onSelected: (v) {
           if (v == 'unpair') {
             unawaited(_confirmUnpair());
+          } else if (v == 'find') {
+            unawaited(_findPc());
           } else {
             unawaited(
               Navigator.of(context).push(
@@ -278,6 +310,7 @@ class _PcPageState extends State<PcPage> {
           }
         },
         itemBuilder: (_) => const [
+          PopupMenuItem(value: 'find', child: Text('Find my PC')),
           PopupMenuItem(value: 'settings', child: Text('Settings')),
           PopupMenuItem(value: 'unpair', child: Text('Forget this PC')),
         ],

@@ -3,8 +3,10 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:pocketdrive_shared/pocketdrive_shared.dart';
 
+import 'discovery.dart';
 import 'pairing_store.dart';
 
 /// None of the PC's addresses answered.
@@ -102,29 +104,64 @@ class PcClient {
     }
   }
 
-  /// Finds a working address of the PC (last one first).
-  Future<String> connect() async {
-    if (_host != null) return _host!;
-    final candidates = {
-      if (pairing.lastHost != null) pairing.lastHost!,
-      ...pairing.hosts,
-    };
-    for (final h in candidates) {
-      try {
-        final info = PcInfo.fromJson(
-          await _send(_http, 'GET', _uri(h, Api.info), token: pairing.token),
-        );
-        if (info.pcId != pairing.pcId) continue;
-        _host = h;
-        if (h != pairing.lastHost) onHostChanged?.call(h);
-        return h;
-      } on NotPaired {
-        rethrow;
-      } on Object {
-        continue;
+  Future<String>? _connecting;
+
+  /// Finds a working address of the PC. Several screens may ask at once;
+  /// they share one search.
+  Future<String> connect() {
+    final h = _host;
+    if (h != null) return Future.value(h);
+    return _connecting ??= _findHost().whenComplete(() => _connecting = null);
+  }
+
+  /// Forget the current address (e.g. after the PC got a new one), so the
+  /// next request searches again.
+  void forgetHost() => _host = null;
+
+  /// 1. the address that worked last time; 2. the network, where the PC
+  /// announces itself (finds it after an address change); 3. every other
+  /// address it ever had. The network search starts right away, in parallel.
+  Future<String> _findHost() async {
+    final search = discoverPcAddresses(pairing.pcId)
+      ..then((found) => debugPrint('PocketDrive discovery found: $found'));
+    final last = pairing.lastHost;
+    if (last != null && await _probe(last)) return _use(last);
+    for (final h in await search) {
+      if (await _probe(h)) {
+        if (!pairing.hosts.contains(h)) pairing.hosts.add(h);
+        return _use(h);
       }
     }
+    for (final h in pairing.hosts) {
+      if (h != last && await _probe(h)) return _use(h);
+    }
     throw const PcUnreachable();
+  }
+
+  String _use(String h) {
+    _host = h;
+    if (h != pairing.lastHost) onHostChanged?.call(h);
+    return h;
+  }
+
+  /// Is our PC (right certificate, right id, accepts our token) at [h]?
+  Future<bool> _probe(String h) async {
+    try {
+      final info = PcInfo.fromJson(
+        await _send(
+          _http,
+          'GET',
+          _uri(h, Api.info),
+          token: pairing.token,
+          timeout: const Duration(seconds: 2),
+        ),
+      );
+      return info.pcId == pairing.pcId;
+    } on NotPaired {
+      rethrow;
+    } on Object {
+      return false;
+    }
   }
 
   Future<PcInfo> info() async {
@@ -135,15 +172,27 @@ class PcClient {
   }
 
   Future<Listing> list(String path) async {
-    final h = await connect();
-    return Listing.fromJson(
-      await _send(
-        _http,
-        'GET',
-        _uri(h, Api.list, {'path': path}),
-        token: pairing.token,
-      ),
-    );
+    Future<Listing> attempt() async {
+      final h = await connect();
+      return Listing.fromJson(
+        await _send(
+          _http,
+          'GET',
+          _uri(h, Api.list, {'path': path}),
+          token: pairing.token,
+        ),
+      );
+    }
+
+    try {
+      return await attempt();
+    } on IOException {
+      forgetHost(); // the PC may have a new address: look for it again
+      return attempt();
+    } on TimeoutException {
+      forgetHost();
+      return attempt();
+    }
   }
 
   /// JPEG thumbnail bytes, or null if the PC has no preview for this file.
@@ -241,6 +290,25 @@ class PcClient {
     return ((res['moved'] as List).length, failed);
   }
 
+  /// Sends [paths] to the PC's Recycle Bin. Returns how many went, and the
+  /// paths that failed with their error codes.
+  Future<(int, Map<String, String>)> delete(List<String> paths) async {
+    final h = await connect();
+    final res = await _send(
+      _http,
+      'POST',
+      _uri(h, Api.delete),
+      token: pairing.token,
+      body: {'paths': paths},
+      timeout: const Duration(seconds: 30),
+    );
+    final failed = <String, String>{
+      for (final f in res['failed'] as List)
+        (f as Map)['path'] as String: f['error'] as String,
+    };
+    return ((res['deleted'] as List).length, failed);
+  }
+
   /// Creates folder [name] inside [parent] on the PC.
   Future<RemoteEntry> mkdir(String parent, String name) async {
     final h = await connect();
@@ -285,8 +353,9 @@ class PcClient {
     Uri uri, {
     String? token,
     Object? body,
+    Duration timeout = _timeout,
   }) async {
-    final req = await http.openUrl(method, uri).timeout(_timeout);
+    final req = await http.openUrl(method, uri).timeout(timeout);
     if (token != null) req.headers.set(Api.authHeader, Api.bearer(token));
     if (body != null) {
       final bytes = utf8.encode(jsonEncode(body));
@@ -294,8 +363,8 @@ class PcClient {
       req.contentLength = bytes.length;
       req.add(bytes);
     }
-    final res = await req.close().timeout(_timeout);
-    final text = await utf8.decodeStream(res).timeout(_timeout);
+    final res = await req.close().timeout(timeout);
+    final text = await utf8.decodeStream(res).timeout(timeout);
     if (res.statusCode == 401) throw const NotPaired();
     if (res.statusCode != 200) {
       var code = 'http_${res.statusCode}';

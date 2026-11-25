@@ -1,9 +1,11 @@
 import 'dart:async';
 
+import 'package:file_picker/file_picker.dart' as files;
 import 'package:image_picker/image_picker.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:pocketdrive_shared/pocketdrive_shared.dart';
 
+import 'app_settings.dart';
 import 'folder_picker.dart';
 import 'pc_client.dart';
 import 'photo_viewer.dart';
@@ -47,6 +49,7 @@ class _BrowserPageState extends State<BrowserPage> {
   StreamSubscription<String>? _uploadSub;
   Listing? _listing;
   String? _error;
+  AppSettings get _settings => widget.session.settings;
   bool _notPaired = false;
   bool _loading = true;
 
@@ -65,18 +68,119 @@ class _BrowserPageState extends State<BrowserPage> {
   void initState() {
     super.initState();
     unawaited(_load());
+    _settings.addListener(_resort);
     // Show new uploads here as soon as they land.
+    // Also when it lands in a direct subfolder: that folder's file count,
+    // shown here, changed.
     _uploadSub = _uploads.folderChanged.listen((folder) {
-      if (folder == widget.path && mounted) unawaited(_load());
+      final slash = folder.lastIndexOf('/');
+      final parent = folder.isEmpty
+          ? null
+          : (slash < 0 ? '' : folder.substring(0, slash));
+      if ((folder == widget.path || parent == widget.path) && mounted) {
+        unawaited(_load());
+      }
     });
   }
 
   @override
   void dispose() {
     unawaited(_uploadSub?.cancel());
+    _settings.removeListener(_resort);
     _scroll.dispose();
     _hoverFolder.dispose();
     super.dispose();
+  }
+
+  /// Folders first, then files; each group by the chosen order (folders
+  /// have no size, so "size" sorts them by name).
+  List<RemoteEntry> _sorted(List<RemoteEntry> entries) {
+    final by = _settings.sortBy;
+    final desc = _settings.sortDescending;
+    int byName(RemoteEntry a, RemoteEntry b) =>
+        a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    int compare(RemoteEntry a, RemoteEntry b) {
+      if (a.isDir != b.isDir) return a.isDir ? -1 : 1;
+      final c = switch (by) {
+        SortBy.name => byName(a, b),
+        SortBy.date => a.modified.compareTo(b.modified),
+        SortBy.size => a.isDir ? byName(a, b) : a.size.compareTo(b.size),
+      };
+      final tie = c == 0 ? byName(a, b) : c;
+      return desc ? -tie : tie;
+    }
+
+    return [...entries]..sort(compare);
+  }
+
+  void _resort() {
+    final l = _listing;
+    if (l == null || !mounted) return;
+    setState(
+      () => _listing = Listing(path: l.path, entries: _sorted(l.entries)),
+    );
+  }
+
+  Widget _sortMenu() {
+    final by = _settings.sortBy;
+    final desc = _settings.sortDescending;
+    return PopupMenuButton<String>(
+      tooltip: 'Sort',
+      icon: const Icon(Icons.sort),
+      onSelected: (v) {
+        switch (v) {
+          case 'asc':
+            unawaited(_settings.setSort(by, descending: false));
+          case 'desc':
+            unawaited(_settings.setSort(by, descending: true));
+          default:
+            final next = SortBy.values.byName(v);
+            // Dates and sizes are most useful newest/biggest first.
+            unawaited(
+              _settings.setSort(
+                next,
+                descending: next == by ? desc : next != SortBy.name,
+              ),
+            );
+        }
+      },
+      itemBuilder: (_) => [
+        CheckedPopupMenuItem(
+          value: SortBy.name.name,
+          checked: by == SortBy.name,
+          child: const Text('Name'),
+        ),
+        CheckedPopupMenuItem(
+          value: SortBy.date.name,
+          checked: by == SortBy.date,
+          child: const Text('Date'),
+        ),
+        CheckedPopupMenuItem(
+          value: SortBy.size.name,
+          checked: by == SortBy.size,
+          child: const Text('Size'),
+        ),
+        const PopupMenuDivider(),
+        CheckedPopupMenuItem(
+          value: 'asc',
+          checked: !desc,
+          child: Text(switch (by) {
+            SortBy.name => 'A to Z',
+            SortBy.date => 'Oldest first',
+            SortBy.size => 'Smallest first',
+          }),
+        ),
+        CheckedPopupMenuItem(
+          value: 'desc',
+          checked: desc,
+          child: Text(switch (by) {
+            SortBy.name => 'Z to A',
+            SortBy.date => 'Newest first',
+            SortBy.size => 'Largest first',
+          }),
+        ),
+      ],
+    );
   }
 
   List<RemoteEntry> get _files => [
@@ -116,6 +220,11 @@ class _BrowserPageState extends State<BrowserPage> {
               onTap: () => Navigator.pop(context, 'move'),
             ),
             ListTile(
+              leading: const Icon(Icons.delete_outline),
+              title: const Text('Delete…'),
+              onTap: () => Navigator.pop(context, 'delete'),
+            ),
+            ListTile(
               leading: const Icon(Icons.select_all),
               title: const Text('Select all'),
               onTap: () => Navigator.pop(context, 'all'),
@@ -132,6 +241,8 @@ class _BrowserPageState extends State<BrowserPage> {
     switch (action) {
       case 'move':
         await _moveToPicker();
+      case 'delete':
+        await _deleteSelected();
       case 'all':
         _selectAll();
       case 'clear':
@@ -151,6 +262,55 @@ class _BrowserPageState extends State<BrowserPage> {
       ),
     );
     if (dest != null) await _moveSelected(dest);
+  }
+
+  /// Sends the selection to the PC's Recycle Bin, after asking.
+  Future<void> _deleteSelected() async {
+    final names = _selected.toList();
+    if (names.isEmpty) return;
+    final n = names.length;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        icon: const Icon(Icons.delete_outline),
+        title: Text('Delete $n ${n == 1 ? 'item' : 'items'}?'),
+        content: const Text(
+          'They go to the Recycle Bin on your PC, where you can still '
+          'restore them.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (!(ok ?? false) || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final (deleted, failed) = await _client.delete([
+        for (final name in names) joinPath(widget.path, name),
+      ]);
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            failed.isEmpty
+                ? 'Moved $deleted ${deleted == 1 ? 'item' : 'items'} to the '
+                      "PC's Recycle Bin"
+                : 'Deleted $deleted, ${failed.length} could not be deleted',
+          ),
+        ),
+      );
+    } on Object catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Delete failed: $e')));
+    }
+    _uploads.notifyFolderChanged(widget.path);
+    _clearSelection();
   }
 
   Future<void> _moveSelected(String dest) async {
@@ -180,8 +340,59 @@ class _BrowserPageState extends State<BrowserPage> {
     _clearSelection();
   }
 
+  /// Upload: the gallery (Android limits it to about 100 per pick) or the
+  /// Files app (no limit: open a folder like DCIM/Camera and Select all).
   Future<void> _upload() async {
-    final picked = await ImagePicker().pickMultipleMedia();
+    final source = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('From gallery'),
+              subtitle: const Text('Up to 100 at a time (an Android limit)'),
+              onTap: () => Navigator.pop(context, 'gallery'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.folder_open),
+              title: const Text('From files'),
+              subtitle: const Text(
+                'No limit. Open a folder (e.g. DCIM > Camera), then '
+                '\u22ee > Select all',
+              ),
+              onTap: () => Navigator.pop(context, 'files'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null || !mounted) return;
+    final List<XFile> picked;
+    if (source == 'gallery') {
+      picked = await ImagePicker().pickMultipleMedia();
+    } else {
+      final messenger = ScaffoldMessenger.of(context);
+      final result = await files.FilePicker.pickFiles(
+        onFileLoading: (status) {
+          // Android copies the chosen files first; with hundreds that
+          // takes a moment.
+          if (status == files.FilePickerStatus.picking) {
+            messenger.showSnackBar(
+              const SnackBar(
+                content: Text('Preparing the selected files…'),
+                duration: Duration(minutes: 5),
+              ),
+            );
+          } else {
+            messenger.hideCurrentSnackBar();
+          }
+        },
+      );
+      picked = [for (final f in result) f.xFile];
+    }
     if (picked.isEmpty) return;
     await _uploads.add(widget.path, picked);
   }
@@ -237,7 +448,7 @@ class _BrowserPageState extends State<BrowserPage> {
     });
     try {
       final listing = await _client.list(widget.path);
-      _listing = listing;
+      _listing = Listing(path: listing.path, entries: _sorted(listing.entries));
     } on NotPaired {
       _notPaired = true;
       _error =
@@ -338,13 +549,6 @@ class _BrowserPageState extends State<BrowserPage> {
         if (!didPop) _clearSelection();
       },
       child: Scaffold(
-        floatingActionButton: listing == null || _selecting
-            ? null
-            : FloatingActionButton.extended(
-                onPressed: _upload,
-                icon: const Icon(Icons.upload),
-                label: const Text('Upload'),
-              ),
         bottomNavigationBar: UploadBanner(queue: _uploads),
         appBar: _selecting
             ? AppBar(
@@ -361,6 +565,11 @@ class _BrowserPageState extends State<BrowserPage> {
                     icon: const Icon(Icons.select_all),
                   ),
                   IconButton(
+                    tooltip: 'Delete',
+                    onPressed: _deleteSelected,
+                    icon: const Icon(Icons.delete_outline),
+                  ),
+                  IconButton(
                     tooltip: 'Move to folder',
                     onPressed: _moveToPicker,
                     icon: const Icon(Icons.drive_file_move_outline),
@@ -375,6 +584,11 @@ class _BrowserPageState extends State<BrowserPage> {
             : AppBar(
                 title: Text(_title),
                 actions: [
+                  IconButton(
+                    tooltip: 'Upload from gallery',
+                    onPressed: listing == null ? null : _upload,
+                    icon: const Icon(Icons.upload),
+                  ),
                   if (media.isNotEmpty)
                     IconButton(
                       tooltip: 'Slideshow',
@@ -386,11 +600,8 @@ class _BrowserPageState extends State<BrowserPage> {
                     onPressed: listing == null ? null : _newFolder,
                     icon: const Icon(Icons.create_new_folder_outlined),
                   ),
-                  IconButton(
-                    tooltip: 'Refresh',
-                    onPressed: _loading ? null : _load,
-                    icon: const Icon(Icons.refresh),
-                  ),
+                  // Refresh: pull down on the list.
+                  _sortMenu(),
                   if (widget.menu != null) widget.menu!,
                 ],
               ),

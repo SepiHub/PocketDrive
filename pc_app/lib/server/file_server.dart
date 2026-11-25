@@ -13,6 +13,7 @@ import 'devices.dart';
 import 'network.dart';
 import 'move.dart';
 import 'path_jail.dart';
+import 'recycle.dart';
 import 'thumbnails.dart';
 import 'uploads.dart';
 
@@ -24,6 +25,7 @@ class ServerContext {
     required this.identity,
     required this.pairingWindow,
     required this.thumbs,
+    this.recycler = recycleToBin,
     this.onPaired,
     void Function(String)? log,
   }) : log = log ?? ((_) {});
@@ -32,6 +34,7 @@ class ServerContext {
   final DeviceStore devices;
   final PcIdentity identity;
   final ThumbnailService thumbs;
+  final Recycler recycler;
 
   /// The currently open pairing window, if any.
   final PairingWindow? Function() pairingWindow;
@@ -58,6 +61,25 @@ Handler buildHandler(ServerContext c) {
     ..get(Api.file, (Request r) => _file(c.jail, r))
     ..get(Api.thumb, (Request r) => _thumb(c, r))
     ..post(Api.upload, (Request r) => _upload(c, r))
+    ..post(Api.delete, (Request r) async {
+      final body = await _readSmallBody(r, 1 << 20);
+      if (body == null) return _error(400, ApiError.badRequest);
+      final List<String> paths;
+      try {
+        paths = [
+          for (final x
+              in (jsonDecode(utf8.decode(body)) as Map)['paths'] as List)
+            x as String,
+        ];
+      } on Object {
+        return _error(400, ApiError.badRequest);
+      }
+      final result = await deleteEntries(c.jail, paths, recycler: c.recycler);
+      c.log(
+        'Moved ${(result['deleted'] as List).length} item(s) to the Recycle Bin',
+      );
+      return _json(200, result);
+    })
     ..post(Api.move, (Request r) async {
       final body = await _readSmallBody(r, 1 << 20);
       if (body == null) return _error(400, ApiError.badRequest);
@@ -313,6 +335,7 @@ class PocketServer {
     required PcIdentity identity,
     required PairingWindow? Function() pairingWindow,
     required ThumbnailService thumbs,
+    Recycler recycler = recycleToBin,
     void Function(PairedDevice)? onPaired,
     InternetAddress? address,
     int port = Api.defaultPort,
@@ -327,6 +350,7 @@ class PocketServer {
         identity: identity,
         pairingWindow: pairingWindow,
         thumbs: thumbs,
+        recycler: recycler,
         onPaired: onPaired,
         log: log,
       ),

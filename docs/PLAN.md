@@ -42,4 +42,4 @@ Nothing in auth or the protocol assumes the LAN. The server currently refuses no
 | 3 ✅ | Phone browsing + thumbnails | Install on the phone, browse, check the grid |
 | 4 ✅ | Video streaming | Play a large video and seek around |
 | 5 ✅ | Uploads from the gallery | Upload photos and a large video; check names and sizes |
-| 6 | mDNS discovery + system tray | Phone finds the PC after an IP change or restart; tray menu works |
+| 6 ✅ | mDNS discovery + system tray | Phone finds the PC after an IP change or restart; tray menu works |

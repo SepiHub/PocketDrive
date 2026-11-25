@@ -6,6 +6,12 @@ import 'pairing.dart';
 abstract final class Api {
   static const int defaultPort = 8787;
 
+  /// mDNS / DNS-SD service type the PC announces itself with.
+  static const String serviceType = '_pcstorage._tcp';
+
+  /// TXT record key holding the PC id (so the phone finds *its* PC).
+  static const String serviceTxtId = 'id';
+
   /// `GET ?path=` -> JSON [Listing].
   static const String list = '/api/list';
 
@@ -30,6 +36,10 @@ abstract final class Api {
   /// `{"moved": [{"from", "name"}], "failed": [{"path", "error"}]}`.
   /// Moved items keep their name unless taken (then ` (2)` is added).
   static const String move = '/api/move';
+
+  /// `POST` with JSON `{"paths": [...]}` -> JSON `{"deleted": [...],
+  /// "failed": [{"path", "error"}]}`. Items go to the PC's Recycle Bin.
+  static const String delete = '/api/delete';
 
   /// `POST` [PairRequest] -> [PairResponse]. The only endpoint that needs no
   /// device token; works only while the PC shows a pairing QR code.
