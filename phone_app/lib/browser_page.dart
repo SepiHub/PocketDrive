@@ -6,6 +6,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:pocketdrive_shared/pocketdrive_shared.dart';
 
 import 'app_settings.dart';
+import 'discovery.dart';
 import 'folder_picker.dart';
 import 'pc_client.dart';
 import 'photo_viewer.dart';
@@ -51,6 +52,8 @@ class _BrowserPageState extends State<BrowserPage> {
   String? _error;
   AppSettings get _settings => widget.session.settings;
   bool _notPaired = false;
+  bool _unreachable = false;
+  bool _searching = false;
   bool _loading = true;
 
   /// Selected file names (folders can't be selected; they're drop targets).
@@ -517,10 +520,60 @@ class _BrowserPageState extends State<BrowserPage> {
     );
   }
 
+  /// Searches the Wi-Fi for the PC's (new) address, then reloads.
+  Future<void> _findPc() async {
+    setState(() => _searching = true);
+    final found = await discoverPcAddresses(_client.pairing.pcId);
+    if (!mounted) return;
+    setState(() => _searching = false);
+    if (found.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            "Didn't find your PC on this Wi-Fi. Is it on, with "
+            'PocketDrive running, and is the phone on the same network?',
+          ),
+        ),
+      );
+      return;
+    }
+    for (final h in found) {
+      if (!_client.pairing.hosts.contains(h)) _client.pairing.hosts.add(h);
+    }
+    _client.forgetHost();
+    await _load();
+  }
+
+  Future<void> _confirmPairAgain() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Pair again?'),
+        content: const Text(
+          'This phone forgets the PC and opens the scanner. On the PC, click '
+          '"Pair a phone" and scan the code. Your folders and files on the '
+          'PC are not affected.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Pair again'),
+          ),
+        ],
+      ),
+    );
+    if (ok ?? false) widget.onNotPaired?.call();
+  }
+
   Future<void> _load() async {
     setState(() {
       _loading = _listing == null;
       _error = null;
+      _unreachable = false;
     });
     try {
       _listedHidden = _settings.showHidden;
@@ -535,9 +588,17 @@ class _BrowserPageState extends State<BrowserPage> {
           '${_client.pairing.pcName} no longer accepts this phone '
           '(it was removed on the PC). Pair again.';
     } on PcUnreachable {
+      _unreachable = true;
+      _listing = null; // stale: show the explanation instead
       _error =
-          "Can't reach ${_client.pairing.pcName}. Is it on, is "
-          'PocketDrive running there, and is the phone on the same Wi-Fi?';
+          "Can't reach ${_client.pairing.pcName}.\n\n"
+          'It may be turned off or asleep, or PocketDrive isn\'t running on '
+          'it. Its address may also have changed.\n\n'
+          '• Try again once the PC is on and PocketDrive is open.\n'
+          '• Find my PC searches this Wi-Fi for its new address.\n'
+          '• If that doesn\'t work, pair again: on the PC, click "Pair a '
+          'phone" and scan the code. Your folders and files stay as they '
+          'are.';
     } on PcError catch (e) {
       _error = e.code == ApiError.notFound
           ? 'This folder no longer exists on the PC.'
@@ -693,11 +754,28 @@ class _BrowserPageState extends State<BrowserPage> {
         body: _loading
             ? const Center(child: CircularProgressIndicator())
             : _error != null && listing == null
-            ? _ErrorView(
-                message: _error!,
-                actionLabel: _notPaired ? 'Pair again' : 'Try again',
-                onAction: _notPaired ? widget.onNotPaired : _load,
-              )
+            ? _unreachable
+                  ? _ErrorView(
+                      message: _error!,
+                      actionLabel: 'Try again',
+                      onAction: _load,
+                      extra: [
+                        OutlinedButton.icon(
+                          onPressed: _searching ? null : _findPc,
+                          icon: const Icon(Icons.wifi_find),
+                          label: Text(_searching ? 'Searching…' : 'Find my PC'),
+                        ),
+                        TextButton(
+                          onPressed: _confirmPairAgain,
+                          child: const Text('Pair again'),
+                        ),
+                      ],
+                    )
+                  : _ErrorView(
+                      message: _error!,
+                      actionLabel: _notPaired ? 'Pair again' : 'Try again',
+                      onAction: _notPaired ? widget.onNotPaired : _load,
+                    )
             : RefreshIndicator(onRefresh: _load, child: _content(listing!)),
       ),
     );
@@ -907,11 +985,13 @@ class _ErrorView extends StatelessWidget {
     required this.message,
     required this.actionLabel,
     required this.onAction,
+    this.extra = const [],
   });
 
   final String message;
   final String actionLabel;
   final VoidCallback? onAction;
+  final List<Widget> extra;
 
   @override
   Widget build(BuildContext context) {
@@ -921,6 +1001,7 @@ class _ErrorView extends StatelessWidget {
         Text(message, style: Theme.of(context).textTheme.bodyLarge),
         const SizedBox(height: 16),
         FilledButton(onPressed: onAction, child: Text(actionLabel)),
+        for (final w in extra) ...[const SizedBox(height: 8), w],
       ],
     );
   }
