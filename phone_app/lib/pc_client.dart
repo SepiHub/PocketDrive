@@ -171,14 +171,14 @@ class PcClient {
     );
   }
 
-  Future<Listing> list(String path) async {
+  Future<Listing> list(String path, {bool showHidden = false}) async {
     Future<Listing> attempt() async {
       final h = await connect();
       return Listing.fromJson(
         await _send(
           _http,
           'GET',
-          _uri(h, Api.list, {'path': path}),
+          _uri(h, Api.list, {'path': path, if (showHidden) 'hidden': '1'}),
           token: pairing.token,
         ),
       );
@@ -307,6 +307,17 @@ class PcClient {
         (f as Map)['path'] as String: f['error'] as String,
     };
     return ((res['deleted'] as List).length, failed);
+  }
+
+  /// Hides (or shows again) a folder in the app. Nothing changes in Windows.
+  Future<void> setHidden(String path, bool hidden) async {
+    final h = await connect();
+    await _send(
+      _http,
+      'POST',
+      _uri(h, Api.hide, {'path': path, 'hidden': hidden ? '1' : '0'}),
+      token: pairing.token,
+    );
   }
 
   /// Creates folder [name] inside [parent] on the PC.

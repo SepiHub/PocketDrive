@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:mime/mime.dart';
+import 'package:path/path.dart' as p;
 import 'package:pocketdrive_shared/pocketdrive_shared.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
@@ -11,6 +12,7 @@ import '../identity.dart';
 import 'byte_range.dart';
 import 'devices.dart';
 import 'network.dart';
+import 'hidden_folders.dart';
 import 'move.dart';
 import 'path_jail.dart';
 import 'recycle.dart';
@@ -26,15 +28,18 @@ class ServerContext {
     required this.pairingWindow,
     required this.thumbs,
     this.recycler = recycleToBin,
+    HiddenFolders? hidden,
     this.onPaired,
     void Function(String)? log,
-  }) : log = log ?? ((_) {});
+  }) : hidden = hidden ?? HiddenFolders.memory(),
+       log = log ?? ((_) {});
 
   final PathJail jail;
   final DeviceStore devices;
   final PcIdentity identity;
   final ThumbnailService thumbs;
   final Recycler recycler;
+  final HiddenFolders hidden;
 
   /// The currently open pairing window, if any.
   final PairingWindow? Function() pairingWindow;
@@ -57,7 +62,8 @@ Handler buildHandler(ServerContext c) {
         PcInfo(pcId: c.identity.pcId, pcName: c.identity.pcName).toJson(),
       ),
     )
-    ..get(Api.list, (Request r) => _list(c.jail, r))
+    ..get(Api.list, (Request r) => _list(c, r))
+    ..post(Api.hide, (Request r) => _hide(c, r))
     ..get(Api.file, (Request r) => _file(c.jail, r))
     ..get(Api.thumb, (Request r) => _thumb(c, r))
     ..post(Api.upload, (Request r) => _upload(c, r))
@@ -75,6 +81,9 @@ Handler buildHandler(ServerContext c) {
         return _error(400, ApiError.badRequest);
       }
       final result = await deleteEntries(c.jail, paths, recycler: c.recycler);
+      for (final p in result['deleted'] as List) {
+        await c.hidden.removed(c.jail.root, p as String);
+      }
       c.log(
         'Moved ${(result['deleted'] as List).length} item(s) to the Recycle Bin',
       );
@@ -98,6 +107,16 @@ Handler buildHandler(ServerContext c) {
         paths,
         r.url.queryParameters['to'] ?? '',
       );
+      // Hidden folders stay hidden at their new place.
+      final to = r.url.queryParameters['to'] ?? '';
+      for (final m in result['moved'] as List) {
+        final name = (m as Map)['name'] as String;
+        await c.hidden.renamed(
+          c.jail.root,
+          m['from'] as String,
+          to.isEmpty ? name : '$to/$name',
+        );
+      }
       c.log('Moved ${(result['moved'] as List).length} item(s)');
       return _json(200, result);
     })
@@ -173,10 +192,49 @@ Future<Response> _pair(ServerContext c, Request r) async {
   );
 }
 
-Future<Response> _list(PathJail jail, Request r) async {
+Future<Response> _list(ServerContext c, Request r) async {
   final rel = _pathParam(r);
-  final entries = await jail.list(rel);
+  final showHidden = r.url.queryParameters['hidden'] == '1';
+  final entries = <RemoteEntry>[];
+  for (final e in await c.jail.list(rel)) {
+    final isHidden =
+        e.isDir &&
+        c.hidden.isHidden(c.jail.root, rel.isEmpty ? e.name : '$rel/${e.name}');
+    if (isHidden && !showHidden) continue;
+    entries.add(
+      isHidden
+          ? RemoteEntry(
+              name: e.name,
+              type: e.type,
+              size: e.size,
+              modified: e.modified,
+              kind: e.kind,
+              fileCount: e.fileCount,
+              hidden: true,
+            )
+          : e,
+    );
+  }
   return _json(200, Listing(path: rel, entries: entries).toJson());
+}
+
+/// Hides or shows a folder in the phone app. Same checks as everywhere:
+/// must be a real folder inside the share (not the share itself, not a
+/// link).
+Future<Response> _hide(ServerContext c, Request r) async {
+  final parts = PathJail.splitRelative(_pathParam(r));
+  if (parts.isEmpty) throw const PathRejected('shared folder itself');
+  final joined = p.joinAll([c.jail.root, ...parts]);
+  if (await FileSystemEntity.type(joined, followLinks: false) ==
+      FileSystemEntityType.link) {
+    throw const PathRejected('link');
+  }
+  final real = await c.jail.resolveExisting(parts.join('/'));
+  if (!await FileSystemEntity.isDirectory(real)) throw const NotADirectory();
+  final hide = r.url.queryParameters['hidden'] != '0';
+  await c.hidden.setHidden(c.jail.root, parts.join('/'), hide);
+  c.log('${hide ? 'Hid' : 'Unhid'} folder ${parts.join('/')}');
+  return _json(200, {'path': parts.join('/'), 'hidden': hide});
 }
 
 Future<Response> _file(PathJail jail, Request r) async {
@@ -336,6 +394,7 @@ class PocketServer {
     required PairingWindow? Function() pairingWindow,
     required ThumbnailService thumbs,
     Recycler recycler = recycleToBin,
+    HiddenFolders? hidden,
     void Function(PairedDevice)? onPaired,
     InternetAddress? address,
     int port = Api.defaultPort,
@@ -351,6 +410,7 @@ class PocketServer {
         pairingWindow: pairingWindow,
         thumbs: thumbs,
         recycler: recycler,
+        hidden: hidden,
         onPaired: onPaired,
         log: log,
       ),

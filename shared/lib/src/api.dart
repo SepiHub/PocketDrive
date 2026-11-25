@@ -12,7 +12,8 @@ abstract final class Api {
   /// TXT record key holding the PC id (so the phone finds *its* PC).
   static const String serviceTxtId = 'id';
 
-  /// `GET ?path=` -> JSON [Listing].
+  /// `GET ?path=[&hidden=1]` -> JSON [Listing]. Hidden folders are left out
+  /// unless `hidden=1`; then they're included with `"hidden": true`.
   static const String list = '/api/list';
 
   /// `GET ?path=` -> file bytes. Supports a single HTTP `Range` (`bytes=a-b`).
@@ -31,6 +32,10 @@ abstract final class Api {
   /// `POST ?path=<parent folder>&name=<new folder name>` -> JSON
   /// [RemoteEntry] of the new folder. 409 `exists` if the name is taken.
   static const String mkdir = '/api/mkdir';
+
+  /// `POST ?path=<folder>&hidden=1|0` -> hides or shows a folder in the
+  /// phone app (nothing changes in Windows).
+  static const String hide = '/api/hide';
 
   /// `POST ?to=<folder>` with JSON `{"paths": [...]}` -> JSON
   /// `{"moved": [{"from", "name"}], "failed": [{"path", "error"}]}`.

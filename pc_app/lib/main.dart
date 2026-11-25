@@ -13,6 +13,7 @@ import 'pairing_dialog.dart';
 import 'server/devices.dart';
 import 'server/file_server.dart';
 import 'server/announce.dart';
+import 'server/hidden_folders.dart';
 import 'server/network.dart';
 import 'server/thumbnails.dart';
 
@@ -68,6 +69,7 @@ class _HomePageState extends State<HomePage> {
   AppConfig? _config;
   PcIdentity? _identity;
   DeviceStore? _devices;
+  HiddenFolders? _hidden;
   StreamSubscription<void>? _devicesSub;
   PairingWindow? _pairing;
   String? _error;
@@ -110,6 +112,9 @@ class _HomePageState extends State<HomePage> {
       );
       final devices = await DeviceStore.load(
         File(p.join(AppConfig.dataDir.path, 'devices.json')),
+      );
+      _hidden = await HiddenFolders.load(
+        File(p.join(AppConfig.dataDir.path, 'hidden.json')),
       );
       _devicesSub = devices.changes.listen((_) {
         if (mounted) setState(() {});
@@ -163,6 +168,7 @@ class _HomePageState extends State<HomePage> {
         identity: _identity!,
         pairingWindow: () => _pairing,
         thumbs: _thumbs,
+        hidden: _hidden,
         onPaired: _paired.add,
         log: debugPrint,
       );

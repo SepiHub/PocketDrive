@@ -113,7 +113,15 @@ class _BrowserPageState extends State<BrowserPage> {
     return [...entries]..sort(compare);
   }
 
+  bool _listedHidden = false;
+
   void _resort() {
+    // Turning "Show hidden folders" on/off needs a fresh list from the PC.
+    if (_settings.showHidden != _listedHidden) {
+      _listedHidden = _settings.showHidden;
+      unawaited(_load());
+      return;
+    }
     final l = _listing;
     if (l == null || !mounted) return;
     setState(
@@ -125,12 +133,14 @@ class _BrowserPageState extends State<BrowserPage> {
     final by = _settings.sortBy;
     final desc = _settings.sortDescending;
     return PopupMenuButton<String>(
-      tooltip: 'Sort',
+      tooltip: 'Sort and view',
       icon: const Icon(Icons.sort),
       onSelected: (v) {
         switch (v) {
           case 'asc':
             unawaited(_settings.setSort(by, descending: false));
+          case 'hidden':
+            _settings.showHidden = !_settings.showHidden;
           case 'desc':
             unawaited(_settings.setSort(by, descending: true));
           default:
@@ -159,6 +169,12 @@ class _BrowserPageState extends State<BrowserPage> {
           value: SortBy.size.name,
           checked: by == SortBy.size,
           child: const Text('Size'),
+        ),
+        const PopupMenuDivider(),
+        CheckedPopupMenuItem(
+          value: 'hidden',
+          checked: _settings.showHidden,
+          child: const Text('Show hidden folders'),
         ),
         const PopupMenuDivider(),
         CheckedPopupMenuItem(
@@ -265,6 +281,66 @@ class _BrowserPageState extends State<BrowserPage> {
   }
 
   /// Sends the selection to the PC's Recycle Bin, after asking.
+  /// Holding a folder: hide it from the list, or show it again.
+  Future<void> _folderMenu(String name) async {
+    if (_selecting) return;
+    final folder = _listing?.entries
+        .where((e) => e.isDir && e.name == name)
+        .firstOrNull;
+    if (folder == null) return;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.folder),
+              title: Text(name, style: Theme.of(context).textTheme.titleMedium),
+            ),
+            if (folder.hidden)
+              ListTile(
+                leading: const Icon(Icons.visibility),
+                title: const Text('Unhide folder'),
+                onTap: () => Navigator.pop(context, 'unhide'),
+              )
+            else
+              ListTile(
+                leading: const Icon(Icons.visibility_off),
+                title: const Text('Hide folder'),
+                subtitle: const Text(
+                  'Tidies it away in this app. It stays a normal folder on '
+                  'the PC.',
+                ),
+                onTap: () => Navigator.pop(context, 'hide'),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (action == null || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await _client.setHidden(joinPath(widget.path, name), action == 'hide');
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            action == 'hide'
+                ? '"$name" is hidden. To see it again: sort menu > '
+                      'Show hidden folders.'
+                : '"$name" is visible again.',
+          ),
+        ),
+      );
+    } on Object catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Could not change it: $e')),
+      );
+    }
+    await _load();
+  }
+
   Future<void> _deleteSelected() async {
     final names = _selected.toList();
     if (names.isEmpty) return;
@@ -447,7 +523,11 @@ class _BrowserPageState extends State<BrowserPage> {
       _error = null;
     });
     try {
-      final listing = await _client.list(widget.path);
+      _listedHidden = _settings.showHidden;
+      final listing = await _client.list(
+        widget.path,
+        showHidden: _listedHidden,
+      );
       _listing = Listing(path: listing.path, entries: _sorted(listing.entries));
     } on NotPaired {
       _notPaired = true;
@@ -645,6 +725,7 @@ class _BrowserPageState extends State<BrowserPage> {
       onDropOnFolder: (name) =>
           unawaited(_moveSelected(joinPath(widget.path, name))),
       onHoldMenu: () => unawaited(_showSelectionMenu()),
+      onFolderHold: (name) => unawaited(_folderMenu(name)),
       hoverFolder: _hoverFolder,
       child: CustomScrollView(
         controller: _scroll,
@@ -663,7 +744,19 @@ class _BrowserPageState extends State<BrowserPage> {
                   leading: Icon(
                     hover == folders[i].name ? Icons.folder_open : Icons.folder,
                   ),
-                  title: FolderName(folders[i]),
+                  title: Opacity(
+                    opacity: folders[i].hidden ? 0.5 : 1,
+                    child: Row(
+                      children: [
+                        Flexible(child: FolderName(folders[i])),
+                        if (folders[i].hidden)
+                          const Padding(
+                            padding: EdgeInsets.only(left: 6),
+                            child: Icon(Icons.visibility_off, size: 16),
+                          ),
+                      ],
+                    ),
+                  ),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => _open(folders[i], files),
                 ),

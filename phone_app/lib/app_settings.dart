@@ -48,6 +48,15 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Hidden folders are listed (dimmed). Not remembered: they're tidied
+  /// away again next time the app starts.
+  bool get showHidden => _showHidden;
+  bool _showHidden = false;
+  set showHidden(bool on) {
+    _showHidden = on;
+    notifyListeners();
+  }
+
   /// How folders are sorted on the phone; remembered.
   SortBy get sortBy =>
       SortBy.values.asNameMap()[_prefs.getString(_sortByKey)] ?? SortBy.name;

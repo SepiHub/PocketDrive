@@ -54,6 +54,7 @@ class SelectionGestures extends StatefulWidget {
     required this.onSelectionChanged,
     required this.onDropOnFolder,
     required this.onHoldMenu,
+    required this.onFolderHold,
     required this.hoverFolder,
     required this.child,
   });
@@ -66,6 +67,9 @@ class SelectionGestures extends StatefulWidget {
   final ValueChanged<Set<String>> onSelectionChanged;
   final ValueChanged<String> onDropOnFolder;
   final VoidCallback onHoldMenu;
+
+  /// Holding a folder row (not while dragging a selection).
+  final ValueChanged<String> onFolderHold;
 
   /// Folder currently under the dragged bubble (for highlighting).
   final ValueNotifier<String?> hoverFolder;
@@ -115,6 +119,11 @@ class _SelectionGesturesState extends State<SelectionGestures> {
   void _start(LongPressStartDetails d) {
     _pointer = d.globalPosition;
     final tag = _tagAt(d.globalPosition);
+    if (tag is FolderTag) {
+      unawaited(HapticFeedback.selectionClick());
+      widget.onFolderHold(tag.name);
+      return;
+    }
     if (tag is! FileTag || tag.index >= widget.fileNames.length) return;
     final name = widget.fileNames[tag.index];
     unawaited(HapticFeedback.selectionClick());

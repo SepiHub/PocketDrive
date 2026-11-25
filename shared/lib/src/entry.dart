@@ -46,6 +46,7 @@ class RemoteEntry {
     required this.modified,
     required this.kind,
     this.fileCount,
+    this.hidden = false,
   });
 
   final String name;
@@ -59,6 +60,9 @@ class RemoteEntry {
   /// For folders: how many files are directly inside (null if unknown).
   final int? fileCount;
 
+  /// For folders: hidden by the user (only listed when asked for).
+  final bool hidden;
+
   bool get isDir => type == EntryType.dir;
 
   Map<String, Object?> toJson() => {
@@ -68,6 +72,7 @@ class RemoteEntry {
     'modified': modified.millisecondsSinceEpoch,
     'kind': kind.name,
     if (fileCount != null) 'fileCount': fileCount,
+    if (hidden) 'hidden': true,
   };
 
   factory RemoteEntry.fromJson(Map<String, Object?> json) => RemoteEntry(
@@ -79,6 +84,7 @@ class RemoteEntry {
     ),
     kind: MediaKind.values.byName(json['kind'] as String),
     fileCount: (json['fileCount'] as num?)?.toInt(),
+    hidden: json['hidden'] == true,
   );
 }
 
