@@ -29,6 +29,7 @@ class PocketDriveApp extends StatelessWidget {
       title: 'PocketDrive',
       debugShowCheckedModeBanner: false,
       scaffoldMessengerKey: PhoneUpdater.messengerKey,
+      navigatorKey: PhoneUpdater.navigatorKey,
       theme: ThemeData(colorSchemeSeed: Colors.teal),
       darkTheme: ThemeData(
         colorSchemeSeed: Colors.teal,

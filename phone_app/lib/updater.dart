@@ -18,6 +18,11 @@ class PhoneUpdater extends ChangeNotifier {
   /// Shows the "update available" banner from anywhere in the app.
   static final messengerKey = GlobalKey<ScaffoldMessengerState>();
 
+  /// The app's navigator, for the dialogs the banner's Update button opens.
+  /// (The messenger sits above the navigator, so its context can't show
+  /// dialogs.)
+  static final navigatorKey = GlobalKey<NavigatorState>();
+
   ReleaseInfo? available;
   double? progress; // 0..1 while downloading
   bool checking = false;
@@ -57,7 +62,7 @@ class PhoneUpdater extends ChangeNotifier {
           FilledButton(
             onPressed: () {
               m.hideCurrentMaterialBanner();
-              final ctx = messengerKey.currentContext;
+              final ctx = navigatorKey.currentState?.overlay?.context;
               if (ctx != null) unawaited(update(ctx));
             },
             child: const Text('Update'),
