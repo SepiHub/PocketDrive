@@ -132,7 +132,7 @@ class _HomePageState extends State<HomePage> {
         _identity = identity;
         _devices = devices;
       });
-      if (config.sharedFolder != null) await _startServer();
+      if (config.sharedFolders.isNotEmpty) await _startServer();
     } on Object catch (e) {
       setState(() => _error = 'Could not start: $e');
     }
@@ -148,32 +148,77 @@ class _HomePageState extends State<HomePage> {
     super.dispose();
   }
 
-  Future<void> _chooseFolder() async {
+  Future<void> _addFolder() async {
+    final folders = _config!.sharedFolders;
     final picked = await getDirectoryPath(
       confirmButtonText: 'Share this folder',
-      initialDirectory: _config?.sharedFolder,
+      initialDirectory: folders.isEmpty ? null : p.dirname(folders.last),
     );
     if (picked == null) return;
-    final problem = checkShareableFolder(picked);
+    final problem = checkShareableFolder(picked, folders);
     if (problem != null) {
       setState(() => _error = problem);
       return;
     }
-    _config!.sharedFolder = picked;
+    folders.add(picked);
     await _config!.save();
     await _startServer();
   }
 
+  Future<void> _removeFolder(String folder) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Stop sharing ${p.basename(folder)}?'),
+        content: const Text(
+          'Phones will no longer see this folder. Nothing in it is deleted.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Stop sharing'),
+          ),
+        ],
+      ),
+    );
+    if (!(ok ?? false)) return;
+    _config!.sharedFolders.remove(folder);
+    await _config!.save();
+    if (_config!.sharedFolders.isEmpty) {
+      await _stopServer();
+    } else {
+      await _startServer();
+    }
+  }
+
   Future<void> _startServer() async {
-    final folder = _config?.sharedFolder;
-    if (folder == null || !_ready) return;
+    final all = _config?.sharedFolders ?? const <String>[];
+    if (all.isEmpty || !_ready) return;
     setState(() {
       _busy = true;
       _error = null;
     });
+    // A folder that was renamed or unplugged is skipped, not fatal.
+    final folders = [
+      for (final f in all)
+        if (Directory(f).existsSync()) f,
+    ];
+    final missing = all.length - folders.length;
+    if (folders.isEmpty) {
+      await _stopServer();
+      setState(() {
+        _busy = false;
+        _error = 'None of the shared folders can be found.';
+      });
+      return;
+    }
     try {
       await _server.start(
-        folder: folder,
+        folders: folders,
         devices: _devices!,
         identity: _identity!,
         pairingWindow: () => _pairing,
@@ -196,6 +241,12 @@ class _HomePageState extends State<HomePage> {
         port: _server.port!,
         log: debugPrint,
       );
+    }
+    if (missing > 0 && _error == null) {
+      _error = missing == 1
+          ? "One shared folder can't be found, so phones won't see it."
+          : "$missing shared folders can't be found, so phones won't see "
+                'them.';
     }
     _shell.updateSharing(sharing: _server.isRunning);
     setState(() => _busy = false);
@@ -296,16 +347,47 @@ class _HomePageState extends State<HomePage> {
             const SizedBox(height: 8),
           ],
           Card(
-            child: ListTile(
-              leading: const Icon(Icons.folder_shared_outlined),
-              title: const Text('Shared folder'),
-              subtitle: Text(config.sharedFolder ?? 'None chosen yet'),
-              trailing: FilledButton.tonal(
-                onPressed: _busy ? null : _chooseFolder,
-                child: Text(
-                  config.sharedFolder == null ? 'Choose folder…' : 'Change…',
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.folder_shared_outlined),
+                  title: Text(
+                    config.sharedFolders.length > 1
+                        ? 'Shared folders'
+                        : 'Shared folder',
+                  ),
+                  subtitle: config.sharedFolders.isEmpty
+                      ? const Text('None chosen yet')
+                      : config.sharedFolders.length > 1
+                      ? const Text('Your phone shows each one as a folder.')
+                      : null,
+                  trailing: FilledButton.tonal(
+                    onPressed: _busy ? null : _addFolder,
+                    child: Text(
+                      config.sharedFolders.isEmpty
+                          ? 'Choose folder…'
+                          : 'Add folder…',
+                    ),
+                  ),
                 ),
-              ),
+                for (final folder in config.sharedFolders)
+                  ListTile(
+                    dense: true,
+                    contentPadding: const EdgeInsets.only(left: 72, right: 16),
+                    leading: Icon(
+                      Directory(folder).existsSync()
+                          ? Icons.folder_outlined
+                          : Icons.folder_off_outlined,
+                    ),
+                    title: Text(p.basename(folder)),
+                    subtitle: Text(folder),
+                    trailing: IconButton(
+                      tooltip: 'Stop sharing this folder',
+                      icon: const Icon(Icons.close),
+                      onPressed: _busy ? null : () => _removeFolder(folder),
+                    ),
+                  ),
+              ],
             ),
           ),
           const SizedBox(height: 8),
@@ -322,11 +404,11 @@ class _HomePageState extends State<HomePage> {
                 _server.isRunning
                     ? 'Paired phones on your home network can connect '
                           '(port ${_server.port}).'
-                    : config.sharedFolder == null
+                    : config.sharedFolders.isEmpty
                     ? 'Choose a folder to start sharing.'
                     : 'Stopped.',
               ),
-              trailing: config.sharedFolder == null
+              trailing: config.sharedFolders.isEmpty
                   ? null
                   : OutlinedButton(
                       onPressed: _busy

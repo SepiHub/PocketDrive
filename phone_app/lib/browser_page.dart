@@ -128,7 +128,11 @@ class _BrowserPageState extends State<BrowserPage> {
     final l = _listing;
     if (l == null || !mounted) return;
     setState(
-      () => _listing = Listing(path: l.path, entries: _sorted(l.entries)),
+      () => _listing = Listing(
+        path: l.path,
+        entries: _sorted(l.entries),
+        isShareList: l.isShareList,
+      ),
     );
   }
 
@@ -286,7 +290,8 @@ class _BrowserPageState extends State<BrowserPage> {
   /// Sends the selection to the PC's Recycle Bin, after asking.
   /// Holding a folder: hide it from the list, or show it again.
   Future<void> _folderMenu(String name) async {
-    if (_selecting) return;
+    // The list of shared folders: they can't be hidden, moved or deleted.
+    if (_selecting || (_listing?.isShareList ?? false)) return;
     final folder = _listing?.entries
         .where((e) => e.isDir && e.name == name)
         .firstOrNull;
@@ -406,6 +411,8 @@ class _BrowserPageState extends State<BrowserPage> {
           content: Text(
             failed.isEmpty
                 ? 'Moved $moved ${moved == 1 ? 'item' : 'items'} to "$where"'
+                : failed.values.every((e) => e == 'other_share')
+                ? "Can't move between different shared folders"
                 : 'Moved $moved, ${failed.length} could not be moved',
           ),
         ),
@@ -581,7 +588,11 @@ class _BrowserPageState extends State<BrowserPage> {
         widget.path,
         showHidden: _listedHidden,
       );
-      _listing = Listing(path: listing.path, entries: _sorted(listing.entries));
+      _listing = Listing(
+        path: listing.path,
+        entries: _sorted(listing.entries),
+        isShareList: listing.isShareList,
+      );
     } on NotPaired {
       _notPaired = true;
       _error =
@@ -730,22 +741,24 @@ class _BrowserPageState extends State<BrowserPage> {
             : AppBar(
                 title: Text(_title),
                 actions: [
-                  IconButton(
-                    tooltip: 'Upload from gallery',
-                    onPressed: listing == null ? null : _upload,
-                    icon: const Icon(Icons.upload),
-                  ),
+                  if (!(listing?.isShareList ?? false))
+                    IconButton(
+                      tooltip: 'Upload from gallery',
+                      onPressed: listing == null ? null : _upload,
+                      icon: const Icon(Icons.upload),
+                    ),
                   if (media.isNotEmpty)
                     IconButton(
                       tooltip: 'Slideshow',
                       onPressed: () => _slideshow(media),
                       icon: const Icon(Icons.slideshow),
                     ),
-                  IconButton(
-                    tooltip: 'New folder',
-                    onPressed: listing == null ? null : _newFolder,
-                    icon: const Icon(Icons.create_new_folder_outlined),
-                  ),
+                  if (!(listing?.isShareList ?? false))
+                    IconButton(
+                      tooltip: 'New folder',
+                      onPressed: listing == null ? null : _newFolder,
+                      icon: const Icon(Icons.create_new_folder_outlined),
+                    ),
                   // Refresh: pull down on the list.
                   _sortMenu(),
                   if (widget.menu != null) widget.menu!,

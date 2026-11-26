@@ -90,15 +90,24 @@ class RemoteEntry {
 
 /// Response of [Api.list].
 class Listing {
-  const Listing({required this.path, required this.entries});
+  const Listing({
+    required this.path,
+    required this.entries,
+    this.isShareList = false,
+  });
 
   /// The listed folder, relative to the shared folder (`''` = top).
   final String path;
   final List<RemoteEntry> entries;
 
+  /// The PC shares several folders and this is the list of them. It isn't a
+  /// real folder: nothing can be uploaded, created or moved here.
+  final bool isShareList;
+
   Map<String, Object?> toJson() => {
     'path': path,
     'entries': [for (final e in entries) e.toJson()],
+    if (isShareList) 'shares': true,
   };
 
   factory Listing.fromJson(Map<String, Object?> json) => Listing(
@@ -107,5 +116,6 @@ class Listing {
       for (final e in json['entries'] as List)
         RemoteEntry.fromJson((e as Map).cast<String, Object?>()),
     ],
+    isShareList: json['shares'] == true,
   );
 }

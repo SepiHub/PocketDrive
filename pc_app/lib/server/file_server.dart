@@ -16,6 +16,7 @@ import 'hidden_folders.dart';
 import 'move.dart';
 import 'path_jail.dart';
 import 'recycle.dart';
+import 'shares.dart';
 import 'subtitles.dart';
 import 'thumbnails.dart';
 import 'uploads.dart';
@@ -23,7 +24,7 @@ import 'uploads.dart';
 /// Everything the request handlers need.
 class ServerContext {
   ServerContext({
-    required this.jail,
+    required this.shares,
     required this.devices,
     required this.identity,
     required this.pairingWindow,
@@ -37,7 +38,7 @@ class ServerContext {
        subtitles = subtitles ?? SubtitleService(defaultSubtitleCache()),
        log = log ?? ((_) {});
 
-  final PathJail jail;
+  final Shares shares;
   final DeviceStore devices;
   final PcIdentity identity;
   final ThumbnailService thumbs;
@@ -70,7 +71,7 @@ Handler buildHandler(ServerContext c) {
     ..post(Api.hide, (Request r) => _hide(c, r))
     ..get(Api.subtitles, (Request r) => _subtitleTracks(c, r))
     ..get(Api.subtitle, (Request r) => _subtitle(c, r))
-    ..get(Api.file, (Request r) => _file(c.jail, r))
+    ..get(Api.file, (Request r) => _file(c, r))
     ..get(Api.thumb, (Request r) => _thumb(c, r))
     ..post(Api.upload, (Request r) => _upload(c, r))
     ..post(Api.delete, (Request r) async {
@@ -86,10 +87,27 @@ Handler buildHandler(ServerContext c) {
       } on Object {
         return _error(400, ApiError.badRequest);
       }
-      final result = await deleteEntries(c.jail, paths, recycler: c.recycler);
-      for (final p in result['deleted'] as List) {
-        await c.hidden.removed(c.jail.root, p as String);
+      final deleted = <String>[];
+      final failed = <Object?>[];
+      for (final MapEntry(key: share, value: items) in _byShare(
+        c,
+        paths,
+        failed,
+      ).entries) {
+        final result = await deleteEntries(share.jail, [
+          for (final x in items) x.rel,
+        ], recycler: c.recycler);
+        final back = {for (final x in items) x.rel: x};
+        for (final p in result['deleted'] as List) {
+          await c.hidden.removed(share.jail.root, p as String);
+          deleted.add(back[p]!.client(p));
+        }
+        for (final f in result['failed'] as List) {
+          final path = (f as Map)['path'] as String;
+          failed.add({...f, 'path': back[path]!.client(path)});
+        }
       }
+      final result = {'deleted': deleted, 'failed': failed};
       c.log(
         'Moved ${(result['deleted'] as List).length} item(s) to the Recycle Bin',
       );
@@ -108,28 +126,48 @@ Handler buildHandler(ServerContext c) {
       } on Object {
         return _error(400, ApiError.badRequest);
       }
-      final result = await moveEntries(
-        c.jail,
-        paths,
-        r.url.queryParameters['to'] ?? '',
-      );
-      // Hidden folders stay hidden at their new place.
-      final to = r.url.queryParameters['to'] ?? '';
-      for (final m in result['moved'] as List) {
-        final name = (m as Map)['name'] as String;
+      final target = c.shares.route(r.url.queryParameters['to'] ?? '');
+      final to = target.rel;
+      final failed = <Object?>[];
+      final same = <Routed>[];
+      _byShare(c, paths, failed).forEach((share, items) {
+        if (share == target.share) {
+          same.addAll(items);
+        } else {
+          // Different folders may be on different drives: not a move.
+          for (final x in items) {
+            failed.add({'path': x.client(x.rel), 'error': 'other_share'});
+          }
+        }
+      });
+      final inner = await moveEntries(target.share.jail, [
+        for (final x in same) x.rel,
+      ], to);
+      final moved = <Object?>[];
+      for (final m in inner['moved'] as List) {
+        final from = (m as Map)['from'] as String;
+        final name = m['name'] as String;
+        // Hidden folders stay hidden at their new place.
         await c.hidden.renamed(
-          c.jail.root,
-          m['from'] as String,
+          target.share.jail.root,
+          from,
           to.isEmpty ? name : '$to/$name',
         );
+        moved.add({'from': target.client(from), 'name': name});
       }
+      for (final f in inner['failed'] as List) {
+        final path = (f as Map)['path'] as String;
+        failed.add({...f, 'path': target.client(path)});
+      }
+      final result = {'moved': moved, 'failed': failed};
       c.log('Moved ${(result['moved'] as List).length} item(s)');
       return _json(200, result);
     })
     ..post(Api.mkdir, (Request r) async {
       final name = r.url.queryParameters['name'];
       if (name == null) return _error(400, ApiError.badRequest);
-      final entry = await createFolder(c.jail, _pathParam(r), name);
+      final at = c.shares.route(_pathParam(r));
+      final entry = await createFolder(at.share.jail, at.rel, name);
       c.log('Created folder ${entry.name}');
       return _json(200, entry.toJson());
     });
@@ -199,13 +237,19 @@ Future<Response> _pair(ServerContext c, Request r) async {
 }
 
 Future<Response> _list(ServerContext c, Request r) async {
-  final rel = _pathParam(r);
+  final clientRel = _pathParam(r);
+  if (c.shares.isMulti && clientRel.isEmpty) {
+    return _json(200, (await _shareListing(c)).toJson());
+  }
+  final at = c.shares.route(clientRel);
+  final rel = at.rel;
+  final jail = at.share.jail;
   final showHidden = r.url.queryParameters['hidden'] == '1';
   final entries = <RemoteEntry>[];
-  for (final e in await c.jail.list(rel)) {
+  for (final e in await jail.list(rel)) {
     final isHidden =
         e.isDir &&
-        c.hidden.isHidden(c.jail.root, rel.isEmpty ? e.name : '$rel/${e.name}');
+        c.hidden.isHidden(jail.root, rel.isEmpty ? e.name : '$rel/${e.name}');
     if (isHidden && !showHidden) continue;
     entries.add(
       isHidden
@@ -221,12 +265,65 @@ Future<Response> _list(ServerContext c, Request r) async {
           : e,
     );
   }
-  return _json(200, Listing(path: rel, entries: entries).toJson());
+  return _json(200, Listing(path: clientRel, entries: entries).toJson());
+}
+
+/// The top level when several folders are shared: one entry per folder.
+Future<Listing> _shareListing(ServerContext c) async {
+  final entries = <RemoteEntry>[];
+  for (final s in c.shares.all) {
+    final stat = await FileStat.stat(s.jail.root);
+    if (stat.type != FileSystemEntityType.directory) continue; // gone
+    int? files;
+    try {
+      files = (await s.jail.list('')).where((e) => !e.isDir).length;
+    } on FileSystemException {
+      files = null;
+    }
+    entries.add(
+      RemoteEntry(
+        name: s.name,
+        type: EntryType.dir,
+        size: 0,
+        modified: stat.modified,
+        kind: MediaKind.other,
+        fileCount: files,
+      ),
+    );
+  }
+  return Listing(path: '', entries: entries, isShareList: true);
+}
+
+/// Groups client paths by share. Paths that don't belong to any share go
+/// straight to [failed].
+Map<Share, List<Routed>> _byShare(
+  ServerContext c,
+  List<String> paths,
+  List<Object?> failed,
+) {
+  final groups = <Share, List<Routed>>{};
+  for (final path in paths) {
+    try {
+      final x = c.shares.route(path);
+      groups.putIfAbsent(x.share, () => []).add(x);
+    } on PathRejected {
+      failed.add({'path': path, 'error': 'bad_path'});
+    } on PathNotFound {
+      failed.add({'path': path, 'error': 'not_found'});
+    }
+  }
+  return groups;
+}
+
+/// Real path of an existing file or folder named by a client path.
+Future<String> _resolve(ServerContext c, Request r) {
+  final at = c.shares.route(_pathParam(r));
+  return at.share.jail.resolveExisting(at.rel);
 }
 
 /// Lists the subtitle tracks built into a video.
 Future<Response> _subtitleTracks(ServerContext c, Request r) async {
-  final real = await c.jail.resolveExisting(_pathParam(r));
+  final real = await _resolve(c, r);
   if (!await FileSystemEntity.isFile(real)) {
     return _error(400, ApiError.notAFile);
   }
@@ -240,7 +337,7 @@ Future<Response> _subtitleTracks(ServerContext c, Request r) async {
 
 /// One built-in subtitle track, converted to WebVTT.
 Future<Response> _subtitle(ServerContext c, Request r) async {
-  final real = await c.jail.resolveExisting(_pathParam(r));
+  final real = await _resolve(c, r);
   if (!await FileSystemEntity.isFile(real)) {
     return _error(400, ApiError.notAFile);
   }
@@ -263,23 +360,26 @@ Future<Response> _subtitle(ServerContext c, Request r) async {
 /// must be a real folder inside the share (not the share itself, not a
 /// link).
 Future<Response> _hide(ServerContext c, Request r) async {
-  final parts = PathJail.splitRelative(_pathParam(r));
+  final at = c.shares.route(_pathParam(r));
+  final jail = at.share.jail;
+  final parts = PathJail.splitRelative(at.rel);
   if (parts.isEmpty) throw const PathRejected('shared folder itself');
-  final joined = p.joinAll([c.jail.root, ...parts]);
+  final joined = p.joinAll([jail.root, ...parts]);
   if (await FileSystemEntity.type(joined, followLinks: false) ==
       FileSystemEntityType.link) {
     throw const PathRejected('link');
   }
-  final real = await c.jail.resolveExisting(parts.join('/'));
+  final real = await jail.resolveExisting(parts.join('/'));
   if (!await FileSystemEntity.isDirectory(real)) throw const NotADirectory();
   final hide = r.url.queryParameters['hidden'] != '0';
-  await c.hidden.setHidden(c.jail.root, parts.join('/'), hide);
-  c.log('${hide ? 'Hid' : 'Unhid'} folder ${parts.join('/')}');
-  return _json(200, {'path': parts.join('/'), 'hidden': hide});
+  await c.hidden.setHidden(jail.root, parts.join('/'), hide);
+  final shown = at.client(parts.join('/'));
+  c.log('${hide ? 'Hid' : 'Unhid'} folder $shown');
+  return _json(200, {'path': shown, 'hidden': hide});
 }
 
-Future<Response> _file(PathJail jail, Request r) async {
-  final real = await jail.resolveExisting(_pathParam(r));
+Future<Response> _file(ServerContext c, Request r) async {
+  final real = await _resolve(c, r);
   final file = File(real);
   if (!await file.exists()) return _error(400, ApiError.notAFile);
   final stat = await file.stat();
@@ -324,9 +424,10 @@ Future<Response> _upload(ServerContext c, Request r) async {
   final name = q['name'];
   if (name == null) return _error(400, ApiError.badRequest);
   final modifiedMs = int.tryParse(q['modified'] ?? '');
+  final at = c.shares.route(_pathParam(r));
   final entry = await receiveUpload(
-    c.jail,
-    _pathParam(r),
+    at.share.jail,
+    at.rel,
     name,
     r.read(),
     expectedLength: r.contentLength,
@@ -339,7 +440,7 @@ Future<Response> _upload(ServerContext c, Request r) async {
 }
 
 Future<Response> _thumb(ServerContext c, Request r) async {
-  final real = await c.jail.resolveExisting(_pathParam(r));
+  final real = await _resolve(c, r);
   if (!await FileSystemEntity.isFile(real)) {
     return _error(400, ApiError.notAFile);
   }
@@ -418,7 +519,7 @@ Middleware _errorMiddleware(void Function(String) log) =>
       }
     };
 
-/// Runs the HTTPS server for one shared folder.
+/// Runs the HTTPS server for the shared folders.
 class PocketServer {
   HttpServer? _server;
 
@@ -429,7 +530,8 @@ class PocketServer {
   /// Listens on all of this PC's IPv4 addresses by default. Windows Firewall
   /// asks once whether to allow that.
   Future<void> start({
-    required String folder,
+    String? folder,
+    List<String>? folders,
     required DeviceStore devices,
     required PcIdentity identity,
     required PairingWindow? Function() pairingWindow,
@@ -443,10 +545,10 @@ class PocketServer {
     void Function(String)? log,
   }) async {
     await stop();
-    final jail = await PathJail.open(folder);
+    final shares = await Shares.open(folders ?? [?folder]);
     final handler = buildHandler(
       ServerContext(
-        jail: jail,
+        shares: shares,
         devices: devices,
         identity: identity,
         pairingWindow: pairingWindow,

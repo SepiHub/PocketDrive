@@ -62,6 +62,9 @@ class _FolderPickerPageState extends State<FolderPickerPage> {
   List<RemoteEntry>? _folders;
   String? _error;
 
+  /// Showing the PC's list of shared folders, which isn't a real folder.
+  bool _shareList = false;
+
   @override
   void initState() {
     super.initState();
@@ -78,12 +81,13 @@ class _FolderPickerPageState extends State<FolderPickerPage> {
     try {
       final listing = await widget.client.list(_path);
       if (!mounted) return;
-      setState(
-        () => _folders = [
+      setState(() {
+        _shareList = listing.isShareList;
+        _folders = [
           for (final e in listing.entries)
             if (e.isDir) e,
-        ],
-      );
+        ];
+      });
     } on Object catch (e) {
       if (mounted) setState(() => _error = 'Could not load folders: $e');
     }
@@ -146,7 +150,8 @@ class _FolderPickerPageState extends State<FolderPickerPage> {
   Widget build(BuildContext context) {
     final folders = _folders;
     final title = _path.isEmpty ? widget.client.pairing.pcName : _path;
-    final canChoose = !widget.disabled.contains(_path);
+    final canChoose =
+        !_shareList && _folders != null && !widget.disabled.contains(_path);
     return Scaffold(
       appBar: AppBar(
         title: Column(
@@ -161,11 +166,12 @@ class _FolderPickerPageState extends State<FolderPickerPage> {
           ],
         ),
         actions: [
-          IconButton(
-            tooltip: 'New folder',
-            onPressed: _newFolder,
-            icon: const Icon(Icons.create_new_folder_outlined),
-          ),
+          if (!_shareList)
+            IconButton(
+              tooltip: 'New folder',
+              onPressed: _newFolder,
+              icon: const Icon(Icons.create_new_folder_outlined),
+            ),
         ],
       ),
       body: _error != null
@@ -201,7 +207,11 @@ class _FolderPickerPageState extends State<FolderPickerPage> {
           child: FilledButton.icon(
             onPressed: canChoose ? () => Navigator.pop(context, _path) : null,
             icon: const Icon(Icons.drive_file_move_outline),
-            label: Text('${widget.actionLabel} "$title"'),
+            label: Text(
+              _shareList
+                  ? 'Open a folder first'
+                  : '${widget.actionLabel} "$title"',
+            ),
           ),
         ),
       ),

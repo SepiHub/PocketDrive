@@ -5,7 +5,7 @@ Use a folder on your Windows PC as extra storage for your Android phone, over yo
 ## Features
 
 **PC app (Windows, Flutter)**
-- Share one folder through a local HTTPS server: list, download, ranged streaming, thumbnails (Windows' own thumbnail engine, photos and videos), upload, new folder, move, delete (to the Recycle Bin).
+- Share one or more folders through a local HTTPS server (with several, the phone shows each as a top-level folder): list, download, ranged streaming, thumbnails (Windows' own thumbnail engine, photos and videos), upload, new folder, move, delete (to the Recycle Bin).
 - Pair phones with a QR code; see and remove paired phones.
 - Announces itself on the network (mDNS) so phones find it after an address change.
 - Lives in the system tray: closing the window keeps sharing; optional start with Windows.
@@ -25,7 +25,7 @@ See [docs/PLAN.md](docs/PLAN.md) for the design and how it was built in stages.
 - **Pairing:** the QR code holds the PC's address, a one-time pairing code (valid 5 minutes) and the fingerprint of the PC's self-signed TLS certificate. The phone exchanges the code for a random 256-bit device token, stored in Android's secure storage. The PC stores only a hash of the token and can revoke any device.
 - **Every request** must carry a valid device token.
 - **Encryption:** all traffic is HTTPS. The phone trusts only the certificate whose fingerprint it got from the QR code (certificate pinning).
-- **Folder jail:** requested paths are relative to the shared folder only. Absolute paths, `..`, drive letters, UNC paths and alternate data streams are rejected, and every path is resolved through symlinks/junctions and checked to still be inside the shared folder.
+- **Folder jail:** requested paths are relative to a shared folder only, and each shared folder has its own jail (nothing moves between them). Absolute paths, `..`, drive letters, UNC paths and alternate data streams are rejected, and every path is resolved through symlinks/junctions and checked to still be inside the shared folder.
 - **Local network only** for now. Keys and certificates are generated on the PC at runtime and are never part of this repository.
 
 ## Layout

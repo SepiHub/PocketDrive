@@ -5,9 +5,11 @@ import 'package:path/path.dart' as p;
 
 /// App settings, stored in `%APPDATA%\PocketDrive\config.json`.
 class AppConfig {
-  AppConfig({this.sharedFolder});
+  AppConfig({List<String>? sharedFolders})
+    : sharedFolders = sharedFolders ?? [];
 
-  String? sharedFolder;
+  /// The folders the phone can see, in the order they were added.
+  final List<String> sharedFolders;
 
   static Directory get dataDir {
     final base = Platform.environment['APPDATA'] ?? Directory.current.path;
@@ -19,7 +21,14 @@ class AppConfig {
   static Future<AppConfig> load() async {
     try {
       final json = jsonDecode(await _file.readAsString()) as Map;
-      return AppConfig(sharedFolder: json['sharedFolder'] as String?);
+      final list = json['sharedFolders'];
+      final old = json['sharedFolder']; // before several folders were allowed
+      return AppConfig(
+        sharedFolders: [
+          if (list is List) ...list.whereType<String>(),
+          if (list is! List && old is String) old,
+        ],
+      );
     } on Object {
       return AppConfig(); // missing or unreadable: start fresh
     }
@@ -30,15 +39,27 @@ class AppConfig {
     final tmp = File('${_file.path}.tmp');
     await tmp.writeAsString(
       const JsonEncoder.withIndent('  ')
-          .convert({'sharedFolder': sharedFolder}),
+          .convert({'sharedFolders': sharedFolders}),
     );
     await tmp.rename(_file.path);
   }
 }
 
 /// Returns why [folder] shouldn't be shared, or null if it's fine.
-String? checkShareableFolder(String folder) {
+/// [others] are the folders already shared.
+String? checkShareableFolder(String folder, [List<String> others = const []]) {
   final full = p.normalize(p.absolute(folder));
+  for (final other in others) {
+    final o = p.normalize(p.absolute(other));
+    if (p.equals(o, full)) return 'That folder is already shared.';
+    if (p.isWithin(o, full)) {
+      return 'That folder is inside one you already share.';
+    }
+    if (p.isWithin(full, o)) {
+      return 'That folder contains one you already share. Remove that one '
+          'first.';
+    }
+  }
   if (p.split(full).length <= 1) {
     return 'Pick a specific folder, not a whole drive.';
   }
